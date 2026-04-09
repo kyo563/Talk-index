@@ -145,98 +145,123 @@ streamlit run crawler/db_app.py
 
 ## GitHub Actions で毎日9時に自動実行（JST）
 
-このリポジトリには、毎日 9:00（JST）にクローラーを実行し、
-YouTube動画情報を Google スプレッドシートへ追記する workflow を追加しています。
+このリポジトリは、毎日 9:00（JST）にクローラーを実行し、
+YouTube動画情報を Google スプレッドシートへ追記します。
 
 - workflow: `.github/workflows/daily_crawl.yml`
 - 実行スクリプト: `python -m crawler.jobs.daily_crawl`
 
-### 必要な GitHub Secrets
+### 必要な GitHub Secrets（daily crawl）
 
-- `YOUTUBE_API_KEY`: YouTube Data API キー
-- `YOUTUBE_CHANNEL_ID`: 対象チャンネルID
-- `SPREADSHEET_ID`: 書き込み先スプレッドシートID
-- `GOOGLE_SERVICE_ACCOUNT_JSON`: サービスアカウントJSON（1行文字列）
-- `TITLE_LIST_WORKSHEET_NAME`: タイトルリストのシート名（未指定時: `タイトルリスト`）
+必須:
+- `YOUTUBE_API_KEY`
+- `YOUTUBE_CHANNEL_ID`
+- `SPREADSHEET_ID`
+- `GOOGLE_SERVICE_ACCOUNT_JSON`
+- `DAILY_MAX_RESULTS`（運用中は `1` 推奨）
 
 任意:
+- `TITLE_LIST_WORKSHEET_NAME`（未指定時: `タイトルリスト`）
 - `SPREADSHEET_WORKSHEET_NAME`（未指定時: `索引`）
-- `DAILY_MAX_RESULTS`（必須。現在は `1` を設定して運用）
 
-### 差分抽出ルール（更新）
+### 差分抽出ルール（現行仕様）
 
-- `TITLE_LIST_WORKSHEET_NAME` シートの **C2以降（動画固有ID）** から動画IDを抽出
-- `TITLE_LIST_WORKSHEET_NAME` にIDが1件以上ある場合は、**そのIDに含まれる動画のみ** を対象化
-- `SPREADSHEET_WORKSHEET_NAME`（索引シート）に既存の動画IDがあれば除外
-- `TITLE_LIST_WORKSHEET_NAME` が空の場合は、チャンネル最新動画から既存IDを除外して追記
+- `TITLE_LIST_WORKSHEET_NAME` シートの2行目以降を参照し、**ID列またはURL列**から動画IDを抽出します。
+- URL列が入っている場合は、URLから動画IDへ変換して扱います。
+- タイトルリストに1件以上IDがある場合は、**そのIDに一致する動画だけ**を対象にします。
+- `SPREADSHEET_WORKSHEET_NAME`（索引シート）に既存の動画IDがある場合は重複追加しません。
+- タイトルリストが空の場合は、チャンネル最新動画から既存IDを除外して追記します。
 
-### タイトルリストシートへの書き込み（更新）
+### タイトルリストシートへの書き込み
 
-`TITLE_LIST_WORKSHEET_NAME`（タイトルリストシート）には、2行目以降へ次の列順で追記します。
+`TITLE_LIST_WORKSHEET_NAME`（タイトルリスト）には、2行目以降へ次の順で追記します。
 
 1. 動画投稿日付（JST日付）
 2. 動画タイトル
 3. 動画固有ID
 
-### コメントのタイムスタンプ抽出（更新）
+### コメントのタイムスタンプ抽出
 
-- 対象は各動画の **コメント1ページ目（topLevelComment）**
-- タイムスタンプ形式（例: `0:32`, `12:05`, `1:02:33`）を含むコメントだけを候補化
-- 候補の中で以下の順で代表コメントを1件選択し、`timestamp_comment` に保存
-  1. タイムスタンプの種類数が多い
+- 対象: 各動画のコメント1ページ目（topLevelComment）
+- `0:32` / `12:05` / `1:02:33` のようなタイムスタンプを含むコメントのみ候補化
+- 代表コメントは次の優先順で1件選択
+  1. タイムスタンプ種類数が多い
   2. いいね数が多い
   3. コメント本文が長い
-- 代表コメント内のタイムスタンプ行を **すべて** 索引シートへ追記
-  - 大見出し: タイムスタンプ（`hh:mm:ss` など）を除去した文字情報のみ
-  - 小見出し: `┝` / `└` とタイムスタンプ（`h:mm:ss` など）を除去した文字情報のみ
-  - 大見出しごとに、対応する小見出しを紐づけて追記
-- タイムスタンプが存在しない動画は、大見出し/小見出し列を空欄にして、その他列のみ追記
+- 代表コメント内のタイムスタンプ行を索引シートへ展開
+  - 大見出し: タイムスタンプ除去後の文字列
+  - 小見出し: `┝` / `└` とタイムスタンプ除去後の文字列
+- タイムスタンプが無い動画は、大見出し/小見出しを空欄で追記
 
-### 索引シートへの書き込み列（更新）
+### 索引シートへの書き込み列
 
-`SPREADSHEET_WORKSHEET_NAME`（索引シート）には、2行目以降へ次の列順で追記します。
+`SPREADSHEET_WORKSHEET_NAME`（索引）には、2行目以降へ次の列順で追記します。
 
 1. タイトル
 2. 日付（JST日付）
 3. URL
-4. 大見出し（タイムスタンプ除去後の文字情報）
-5. 大見出しURL（`?t=` 付き動画URL）
-6. 小見出し（記号・タイムスタンプ除去後の文字情報）
-7. 小見出しURL（`?t=` 付き動画URL）
-8. 自動検出タグ（YouTubeタグを `,` 連結し、各タグ先頭に `#` を付与）
+4. 大見出し
+5. 大見出しURL（`?t=` 付き）
+6. 小見出し
+7. 小見出しURL（`?t=` 付き）
+8. 自動検出タグ（YouTubeタグを `,` 連結し各タグ先頭に `#`）
 
-### スプレッドシートの注意
+## 索引シートJSONをR2へアップロード
 
-- サービスアカウントの `client_email` を対象スプレッドシートに共有してください（編集者）。
-- 初回実行時、指定ワークシートがなければ自動で作成されます。
-
-## 索引シートJSONをR2へアップロード（新規）
-
-索引シートをJSON化し、Cloudflare R2 の `index/latest.json` に配置する workflow を追加しました。
+索引シートをJSON化し、Cloudflare R2 の `index/latest.json` に配置します。
 
 - workflow: `.github/workflows/upload_index_json_to_r2.yml`
 - 実行スクリプト: `python exporter/sheet_to_json_and_upload_r2.py`
-- 実行タイミング: 手動実行 (`workflow_dispatch`) / 毎日定期実行 (`schedule`)
+- 実行タイミング: 手動 (`workflow_dispatch`) / 毎日定期 (`schedule`)
 
-### 必要な GitHub Secrets（R2アップロード用）
+### 必要な GitHub Secrets（R2）
 
+必須:
 - `SPREADSHEET_ID`
-- `SPREADSHEET_WORKSHEET_NAME`（未指定時は `索引`）
 - `GOOGLE_SERVICE_ACCOUNT_JSON`
 - `R2_ACCOUNT_ID`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET_NAME`
 
+任意:
+- `SPREADSHEET_WORKSHEET_NAME`（未指定時: `索引`）
+
 ### 生成されるJSON
 
 - 対象: `SPREADSHEET_WORKSHEET_NAME`（既定: `索引`）の2行目以降
-- 形式: 配列（各要素は1行分のオブジェクト）
-- キー名: シート1行目の見出し文字列をそのまま使用
-- 空行: 自動で除外
+- 形式: 配列（1行 = 1オブジェクト）
+- キー名: シート1行目の見出しをそのまま使用
+- 空行: 自動除外
 
-### 失敗時の挙動
+## 運用手順（READMEだけで運用するための最短手順）
 
-- 必須環境変数が未設定なら、どの変数が不足かを明示して fail
-- シート読み取り失敗時は、設定値/権限確認を促すメッセージで fail
-- R2アップロード失敗時は、認証情報・バケット名・権限確認を促すメッセージで fail
+### 1. 初期設定（最初に1回だけ）
+
+1. GitHub Secrets を登録（daily crawl 用 + R2 用）。
+2. スプレッドシートを作成し、`GOOGLE_SERVICE_ACCOUNT_JSON` の `client_email` を編集者で共有。
+3. 必要ならワークシート名を Secrets に設定（未設定なら既定値を使用）。
+
+### 2. 日次運用の実行順
+
+1. `daily_crawl.yml` を実行（定期実行または手動）。
+2. 正常終了を確認後、`upload_index_json_to_r2.yml` を実行（または定期実行を待つ）。
+3. R2 の `index/latest.json` 更新を確認。
+
+### 3. 毎回の確認手順
+
+1. GitHub Actions の実行結果が `Success` か確認。
+2. 索引シートに新規行が増えているか確認。
+3. R2 の `index/latest.json` の更新時刻が新しいか確認。
+
+### 4. 失敗時の確認（チェックリスト）
+
+- **環境変数エラー**: エラーログに出た不足Secret名を追加/修正。
+- **シートアクセス失敗**: `client_email` 共有漏れ、`SPREADSHEET_ID`、ワークシート名を確認。
+- **R2アップロード失敗**: `R2_ACCOUNT_ID` / キー / バケット名 / 書き込み権限を確認。
+- **差分が入らない**: タイトルリストの ID列またはURL列に値があるか確認。
+
+### 5. 補足
+
+- 必須環境変数が未設定の場合は、不足している変数名を明示して fail します。
+- 例外は握りつぶさず、原因がわかるメッセージで fail します。
