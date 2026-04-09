@@ -13,6 +13,17 @@
         <p>動画内トークを見出し構造で探せます。</p>
       </header>
 
+      <section class="guide" aria-label="探索ガイド">
+        <article class="guide-card">
+          <h2>動画から探す</h2>
+          <p>気になる動画を先に選んで、大見出し・小見出しへ降ります。</p>
+        </article>
+        <article class="guide-card">
+          <h2>テーマから探す</h2>
+          <p>気になる話題を先に選んで、該当動画へ移動します。</p>
+        </article>
+      </section>
+
       <section class="controls">
         <div class="tabs" role="tablist" aria-label="ビュー切替">
           <button id="tab-video" class="tab is-active" data-view="video" role="tab" aria-selected="true">
@@ -34,8 +45,11 @@
         </label>
       </section>
 
-      <p id="notice" class="notice"></p>
-      <p id="error" class="error" role="alert"></p>
+      <section class="status" aria-live="polite">
+        <p id="result-meta" class="result-meta"></p>
+        <p id="notice" class="notice"></p>
+        <p id="error" class="error" role="alert"></p>
+      </section>
 
       <section id="results" class="results" aria-live="polite"></section>
     </main>

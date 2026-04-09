@@ -1,4 +1,7 @@
-const DATA_URL = window.TALK_INDEX_DATA_URL || "index/latest.json";
+const configuredDataUrl = text(window.TALK_INDEX_DATA_URL);
+const DATA_URL_CANDIDATES = configuredDataUrl
+  ? [configuredDataUrl]
+  : ["index/latest.json", "./index/latest.json", "/index/latest.json", "latest.json"];
 
 const state = {
   view: "video",
@@ -32,6 +35,7 @@ const refs = {
   search: document.getElementById("search"),
   sort: document.getElementById("sort"),
   sortLabel: document.getElementById("sort-label"),
+  resultMeta: document.getElementById("result-meta"),
   notice: document.getElementById("notice"),
   error: document.getElementById("error"),
   results: document.getElementById("results"),
@@ -168,7 +172,7 @@ function getFilteredVideos() {
   const keyword = state.search.toLowerCase();
   const filtered = state.videos.filter((video) => containsAnyTarget(video, keyword));
 
-  const sorted = filtered.sort((a, b) => {
+  return filtered.sort((a, b) => {
     switch (state.sortVideo) {
       case "oldest":
         return a.dateValue - b.dateValue;
@@ -181,8 +185,6 @@ function getFilteredVideos() {
         return b.dateValue - a.dateValue;
     }
   });
-
-  return sorted;
 }
 
 function getFilteredThemes() {
@@ -197,7 +199,7 @@ function getFilteredThemes() {
     });
   });
 
-  const sorted = filtered.sort((a, b) => {
+  return filtered.sort((a, b) => {
     switch (state.sortTheme) {
       case "count_asc":
         return a.appearances - b.appearances;
@@ -210,8 +212,6 @@ function getFilteredThemes() {
         return b.appearances - a.appearances;
     }
   });
-
-  return sorted;
 }
 
 function renderSortOptions() {
@@ -370,19 +370,28 @@ function renderNotice() {
     : "";
 }
 
+function renderResultMeta(count) {
+  const label = state.view === "video" ? "動画" : "テーマ";
+  refs.resultMeta.textContent = `${label}の表示件数: ${count}件`;
+}
+
 function render() {
   renderSortOptions();
   renderNotice();
   refs.error.textContent = "";
 
   if (state.view === "video") {
-    renderVideoCards(getFilteredVideos());
+    const videos = getFilteredVideos();
+    renderVideoCards(videos);
+    renderResultMeta(videos.length);
     refs.tabVideo.classList.add("is-active");
     refs.tabTheme.classList.remove("is-active");
     refs.tabVideo.setAttribute("aria-selected", "true");
     refs.tabTheme.setAttribute("aria-selected", "false");
   } else {
-    renderThemeCards(getFilteredThemes());
+    const themes = getFilteredThemes();
+    renderThemeCards(themes);
+    renderResultMeta(themes.length);
     refs.tabTheme.classList.add("is-active");
     refs.tabVideo.classList.remove("is-active");
     refs.tabTheme.setAttribute("aria-selected", "true");
@@ -420,22 +429,40 @@ function setupEvents() {
   });
 }
 
-async function loadData() {
-  let rows;
-  try {
-    const response = await fetch(DATA_URL, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`JSON取得に失敗しました (HTTP ${response.status})`);
-    }
+async function tryFetchJson(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`JSON取得に失敗しました (HTTP ${response.status})`);
+  }
+  return response.json();
+}
 
-    rows = await response.json();
-  } catch (error) {
-    setError(`データ取得に失敗しました。URLやCORS設定を確認してください。詳細: ${error.message}`);
+async function loadData() {
+  refs.resultMeta.textContent = "データ読み込み中...";
+
+  let rows = null;
+  const errors = [];
+
+  for (const url of DATA_URL_CANDIDATES) {
+    try {
+      rows = await tryFetchJson(url);
+      break;
+    } catch (error) {
+      errors.push(`${url}: ${error.message}`);
+    }
+  }
+
+  if (!rows) {
+    const checked = DATA_URL_CANDIDATES.join(", ");
+    const details = errors.join(" / ");
+    setError(`データ取得に失敗しました。確認URL: ${checked}。詳細: ${details}`);
+    refs.resultMeta.textContent = "";
     return;
   }
 
   if (!Array.isArray(rows)) {
     setError("JSON形式が不正です。配列データを想定しています。");
+    refs.resultMeta.textContent = "";
     return;
   }
 
