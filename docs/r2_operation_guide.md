@@ -6,10 +6,10 @@
 
 ## 1. 非公開バケット作成手順
 
-対象バケット名: `Talk-indexdepo`
+対象バケット名: `talk-indexdepo`
 
 1. Cloudflare Dashboard → **R2** → **Create bucket** を開く
-2. Bucket name に `Talk-indexdepo` を入力して作成
+2. Bucket name に `talk-indexdepo` を入力して作成
 3. **Public access は有効化しない（非公開のまま）**
 4. R2 API Tokens で、次の最小権限トークンを作成
    - 権限: Object Read / Object Write（対象バケットのみ）
@@ -27,7 +27,7 @@
 
 ### 2-2. Worker の環境変数（Secrets）
 
-- `R2_BUCKET_NAME=Talk-indexdepo`
+- `R2_BUCKET_NAME=talk-indexdepo`
 - `R2_OBJECT_KEY=index/latest.json`
 
 ### 2-3. R2 バインディング
@@ -35,7 +35,7 @@
 Worker に R2 binding を追加:
 
 - Binding name: `INDEX_BUCKET`
-- Bucket: `Talk-indexdepo`
+- Bucket: `talk-indexdepo`
 
 ### 2-4. Worker サンプル（最小）
 
@@ -99,7 +99,7 @@ export default {
 
 ## 5. 完了条件（初回構築者チェックリスト）
 
-- [ ] `Talk-indexdepo` が非公開で作成されている
+- [ ] `talk-indexdepo` が非公開で作成されている
 - [ ] GitHub Secrets に R2認証情報が設定されている
 - [ ] Action 実行で `index/latest.json` が更新される
 - [ ] Worker URL で JSON が 200 で返る
