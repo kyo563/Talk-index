@@ -127,3 +127,29 @@ streamlit run crawler/app.py
 - 差分更新、再試行、バックフィル戦略は維持
 - ただし現在フェーズでは、まず動画一覧取得の信頼性を優先
 - 未実装要素は段階的に追加
+
+---
+
+## GitHub Actions で毎日9時に自動実行（JST）
+
+このリポジトリには、毎日 9:00（JST）にクローラーを実行し、
+YouTube動画情報を Google スプレッドシートへ追記する workflow を追加しています。
+
+- workflow: `.github/workflows/daily_crawl.yml`
+- 実行スクリプト: `python -m crawler.jobs.daily_crawl`
+
+### 必要な GitHub Secrets
+
+- `YOUTUBE_API_KEY`: YouTube Data API キー
+- `YOUTUBE_CHANNEL_ID`: 対象チャンネルID
+- `SPREADSHEET_ID`: 書き込み先スプレッドシートID
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: サービスアカウントJSON（1行文字列）
+
+任意:
+- `SPREADSHEET_WORKSHEET_NAME`（未指定時: `videos`）
+- `DAILY_MAX_RESULTS`（未指定時: `50`）
+
+### スプレッドシートの注意
+
+- サービスアカウントの `client_email` を対象スプレッドシートに共有してください（編集者）。
+- 初回実行時、指定ワークシートがなければ自動で作成されます。
