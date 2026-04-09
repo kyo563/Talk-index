@@ -24,6 +24,7 @@ jobs:
 
       - name: Export sheet and upload to R2
         env:
+          PYTHONPATH: ${{ github.workspace }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           SPREADSHEET_WORKSHEET_NAME: ${{ secrets.SPREADSHEET_WORKSHEET_NAME }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
