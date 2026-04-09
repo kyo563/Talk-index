@@ -18,6 +18,8 @@ class SpreadsheetServiceError(RuntimeError):
 TIMESTAMP_WITH_LABEL_PATTERN = re.compile(
     r"(?P<ts>(?:\d{1,2}:)?\d{1,2}:\d{2})\s*(?P<label>[^\n\r]*)"
 )
+TIMESTAMP_TOKEN_PATTERN = re.compile(r"\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b")
+MARKER_TOKEN_PATTERN = re.compile(r"[└┝├]")
 MAJOR_LINE_PATTERN = re.compile(r"^\s*(?P<ts>\d{2}:\d{2}:\d{2})\s*(?P<label>.*)$")
 MINOR_LINE_PATTERN = re.compile(
     r"^\s*(?P<marker>[┝└├])\s*(?P<ts>\d{1,2}:\d{2}:\d{2})\s*(?P<label>.*)$"
@@ -175,7 +177,7 @@ def append_videos(
                     major_url,
                     minor,
                     minor_url,
-                    "|".join(video.tags),
+                    _format_tags(video.tags),
                 ]
             )
 
@@ -249,8 +251,8 @@ def _extract_timestamp_rows(video_url: str, timestamp_comment: str) -> list[tupl
 
             major_ts = _normalize_major_timestamp(major_match.group("ts") or "")
             if major_ts:
-                label = (major_match.group("label") or "").strip()
-                current_major_text = f"{major_ts} {label}".strip()
+                label = _clean_heading_text(major_match.group("label") or "")
+                current_major_text = label
                 current_major_url = _build_timestamp_url(video_url, major_ts)
                 has_minor_for_current_major = False
             continue
@@ -260,9 +262,8 @@ def _extract_timestamp_rows(video_url: str, timestamp_comment: str) -> list[tupl
             minor_raw_ts = (minor_match.group("ts") or "").strip()
             minor_ts = _normalize_minor_timestamp(minor_raw_ts)
             if minor_ts:
-                label = (minor_match.group("label") or "").strip()
-                marker = (minor_match.group("marker") or "┝").strip() or "┝"
-                minor_text = f"{marker}{minor_ts} {label}".strip()
+                label = _clean_heading_text(minor_match.group("label") or "")
+                minor_text = label
                 rows.append(
                     (
                         current_major_text,
@@ -287,10 +288,32 @@ def _extract_timestamp_rows(video_url: str, timestamp_comment: str) -> list[tupl
         normalized = _normalize_major_timestamp(ts)
         if not normalized:
             continue
-        major_text = f"{normalized} {label}".strip()
+        major_text = _clean_heading_text(label)
         rows.append((major_text, _build_timestamp_url(video_url, normalized), "", ""))
 
     return rows
+
+
+def _clean_heading_text(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    value = MARKER_TOKEN_PATTERN.sub(" ", value)
+    value = TIMESTAMP_TOKEN_PATTERN.sub(" ", value)
+    value = re.sub(r"\s+", " ", value)
+    return value.strip()
+
+
+def _format_tags(tags: Iterable[str]) -> str:
+    normalized: list[str] = []
+    for tag in tags:
+        value = (tag or "").strip()
+        if not value:
+            continue
+        if not value.startswith("#"):
+            value = f"#{value}"
+        normalized.append(value)
+    return ",".join(normalized)
 
 
 def _normalize_major_timestamp(timestamp: str) -> str:
