@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 from googleapiclient.discovery import build
@@ -9,6 +10,7 @@ from crawler.models import VideoItem
 from crawler.utils import extract_channel_hint, looks_like_channel_id
 
 Logger = Callable[[str], None]
+TIMESTAMP_PATTERN = re.compile(r"\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b")
 
 
 class YouTubeServiceError(RuntimeError):
@@ -147,6 +149,13 @@ def fetch_channel_videos(
             )
 
             video_id = item.get("id", "")
+            timestamp_comment = ""
+            try:
+                timestamp_comment = extract_timestamp_comment(youtube, video_id)
+            except YouTubeServiceError as exc:
+                if log:
+                    log(f"コメント抽出スキップ: video_id={video_id}, reason={exc}")
+
             videos.append(
                 VideoItem(
                     video_id=video_id,
@@ -155,8 +164,51 @@ def fetch_channel_videos(
                     published_at=snippet.get("publishedAt", ""),
                     thumbnail_url=thumb_url,
                     tags=snippet.get("tags", []),
+                    timestamp_comment=timestamp_comment,
                 )
             )
 
     videos.sort(key=lambda x: x.published_at, reverse=True)
     return videos[:max_results]
+
+
+def extract_timestamp_comment(youtube, video_id: str) -> str:
+    if not video_id.strip():
+        return ""
+
+    try:
+        response = (
+            youtube.commentThreads()
+            .list(
+                part="snippet",
+                videoId=video_id,
+                order="relevance",
+                textFormat="plainText",
+                maxResults=100,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        raise YouTubeServiceError(f"commentThreads.list でエラー: video_id={video_id}, detail={exc}") from exc
+
+    best_text = ""
+    best_score = (-1, -1, -1)  # timestamp_count, like_count, text_length
+    for item in response.get("items", []):
+        snippet = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+        text = (snippet.get("textOriginal", "") or "").strip()
+        if not text:
+            continue
+
+        timestamps = TIMESTAMP_PATTERN.findall(text)
+        if not timestamps:
+            continue
+
+        unique_timestamps = len(set(timestamps))
+        like_count = int(snippet.get("likeCount", 0) or 0)
+        text_length = len(text)
+        score = (unique_timestamps, like_count, text_length)
+        if score > best_score:
+            best_score = score
+            best_text = text
+
+    return best_text

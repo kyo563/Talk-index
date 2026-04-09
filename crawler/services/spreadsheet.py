@@ -138,6 +138,7 @@ def append_videos(
         "published_at",
         "thumbnail_url",
         "tags",
+        "timestamp_comment",
     ]
 
     if not sheet.get_all_values():
@@ -156,6 +157,7 @@ def append_videos(
                 video.published_at,
                 video.thumbnail_url,
                 "|".join(video.tags),
+                video.timestamp_comment,
             ]
         )
 
