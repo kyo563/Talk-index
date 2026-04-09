@@ -130,6 +130,19 @@ streamlit run crawler/app.py
 
 ---
 
+
+### 手動データ読み込みページ（talk-indexDB）
+
+定刻の GitHub Actions とは別に、手動で差分取り込みを実行できます。
+
+```bash
+streamlit run crawler/db_app.py
+```
+
+- ページタイトル: `talk-indexDB`
+- 「読み込み実行」を押すたびに 1件（または指定件数）を取り込み
+- 実行ごとに成否（成功/失敗）を画面に表示
+
 ## GitHub Actions で毎日9時に自動実行（JST）
 
 このリポジトリには、毎日 9:00（JST）にクローラーを実行し、
