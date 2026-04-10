@@ -214,34 +214,47 @@ function createAnchor(href, label) {
 
 function buildFormattedFragment(raw) {
   const fragment = document.createDocumentFragment();
-  const tokens = String(raw || "").split(/(\*\*|--)/);
-  let isBold = false;
-  let isStrike = false;
+  const value = String(raw || "");
+  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|--[^-]+--|-[^-]+-)/g;
+  let lastIndex = 0;
 
-  tokens.forEach((token) => {
-    if (token === "**") {
-      isBold = !isBold;
-      return;
+  value.replace(pattern, (matched, _unused, offset) => {
+    if (offset > lastIndex) {
+      fragment.appendChild(document.createTextNode(value.slice(lastIndex, offset)));
     }
-    if (token === "--") {
-      isStrike = !isStrike;
-      return;
-    }
-    if (!token) return;
 
-    let node = document.createTextNode(token);
-    if (isBold) {
+    let content = matched;
+    let node = document.createTextNode(content);
+    if (matched.startsWith("**") && matched.endsWith("**")) {
+      content = matched.slice(2, -2);
       const strong = document.createElement("strong");
-      strong.appendChild(node);
+      strong.appendChild(document.createTextNode(content));
       node = strong;
-    }
-    if (isStrike) {
+    } else if (matched.startsWith("*") && matched.endsWith("*")) {
+      content = matched.slice(1, -1);
+      const strong = document.createElement("strong");
+      strong.appendChild(document.createTextNode(content));
+      node = strong;
+    } else if (matched.startsWith("--") && matched.endsWith("--")) {
+      content = matched.slice(2, -2);
       const s = document.createElement("s");
-      s.appendChild(node);
+      s.appendChild(document.createTextNode(content));
+      node = s;
+    } else if (matched.startsWith("-") && matched.endsWith("-")) {
+      content = matched.slice(1, -1);
+      const s = document.createElement("s");
+      s.appendChild(document.createTextNode(content));
       node = s;
     }
+
     fragment.appendChild(node);
+    lastIndex = offset + matched.length;
+    return matched;
   });
+
+  if (lastIndex < value.length) {
+    fragment.appendChild(document.createTextNode(value.slice(lastIndex)));
+  }
 
   return fragment;
 }
