@@ -132,23 +132,26 @@ function isTalkSectionVisible(name) {
   return name !== "【オープニングトーク】" && name !== "【エンディングトーク】";
 }
 
+function ensureTalkSection(bySection, row) {
+  if (!bySection.has(row.section)) {
+    bySection.set(row.section, {
+      key: row.section,
+      name: row.section,
+      sectionUrl: row.sectionUrl,
+      subsections: [],
+    });
+  }
+  return bySection.get(row.section);
+}
+
 function groupTalks(rows) {
   const bySection = new Map();
 
   rows.forEach((row) => {
     if (!row.section || !isTalkSectionVisible(row.section)) return;
-
-    if (!bySection.has(row.section)) {
-      bySection.set(row.section, {
-        key: row.section,
-        name: row.section,
-        sectionUrl: row.sectionUrl,
-        subsections: [],
-      });
-    }
+    const talk = ensureTalkSection(bySection, row);
 
     if (row.subsection) {
-      const talk = bySection.get(row.section);
       talk.subsections.push({
         name: row.subsection,
         videoTitle: row.title || "タイトルなし",
@@ -176,10 +179,12 @@ function includesKeyword(value, keyword) {
   return String(value || "").toLowerCase().includes(keyword);
 }
 
-function hitVideo(video, search) {
-  if (search.mode === "none") return true;
-  if (!search.keyword) return true;
+function canSkipSearch(search) {
+  return search.mode === "none" || !search.keyword;
+}
 
+function hitVideo(video, search) {
+  if (canSkipSearch(search)) return true;
   if (search.mode === "tag") {
     return video.tags.some((tag) => includesKeyword(tag, search.keyword));
   }
@@ -192,8 +197,7 @@ function hitVideo(video, search) {
 }
 
 function hitTalk(talk, search) {
-  if (search.mode === "none") return true;
-  if (!search.keyword) return true;
+  if (canSkipSearch(search)) return true;
   if (search.mode === "tag") return false;
   if (includesKeyword(talk.name, search.keyword)) return true;
   return talk.subsections.some((sub) => includesKeyword(sub.name, search.keyword));
@@ -559,6 +563,24 @@ function pickRandomSection() {
   render();
 }
 
+function toggleAllByMode() {
+  if (state.viewMode === "video") {
+    const allOpen = state.videos.length > 0 && state.openVideoKeys.size === state.videos.length;
+    state.openVideoKeys = allOpen ? new Set() : new Set(state.videos.map((v) => v.key));
+    return;
+  }
+
+  const allOpen = state.talks.length > 0 && state.openTalkKeys.size === state.talks.length;
+  state.openTalkKeys = allOpen ? new Set() : new Set(state.talks.map((talk) => talk.key));
+}
+
+function switchViewMode(mode) {
+  state.viewMode = mode;
+  state.randomTalkKeys = null;
+  state.randomSection = "";
+  render();
+}
+
 async function init() {
   refs.search.addEventListener("input", (event) => {
     state.search = text(event.target.value);
@@ -575,21 +597,7 @@ async function init() {
   });
 
   refs.toggleAll.addEventListener("click", () => {
-    if (state.viewMode === "video") {
-      const allOpen = state.videos.length > 0 && state.openVideoKeys.size === state.videos.length;
-      if (allOpen) {
-        state.openVideoKeys.clear();
-      } else {
-        state.openVideoKeys = new Set(state.videos.map((v) => v.key));
-      }
-    } else {
-      const allOpen = state.talks.length > 0 && state.openTalkKeys.size === state.talks.length;
-      if (allOpen) {
-        state.openTalkKeys.clear();
-      } else {
-        state.openTalkKeys = new Set(state.talks.map((talk) => talk.key));
-      }
-    }
+    toggleAllByMode();
     render();
   });
 
@@ -598,17 +606,11 @@ async function init() {
   });
 
   refs.tabVideo.addEventListener("click", () => {
-    state.viewMode = "video";
-    state.randomTalkKeys = null;
-    state.randomSection = "";
-    render();
+    switchViewMode("video");
   });
 
   refs.tabTalk.addEventListener("click", () => {
-    state.viewMode = "talk";
-    state.randomTalkKeys = null;
-    state.randomSection = "";
-    render();
+    switchViewMode("talk");
   });
 
   try {
