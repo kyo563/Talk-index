@@ -26,6 +26,7 @@ const refs = {
   randomSection: document.getElementById("random-section"),
   tabVideo: document.getElementById("tab-video"),
   tabTalk: document.getElementById("tab-talk"),
+  topButton: document.getElementById("top-button"),
 };
 
 function text(value) {
@@ -257,6 +258,33 @@ function buildFormattedFragment(raw) {
   }
 
   return fragment;
+}
+
+
+function lerpColorHex(fromHex, toHex, ratio) {
+  const r = Math.min(1, Math.max(0, ratio));
+  const from = fromHex.replace("#", "");
+  const to = toHex.replace("#", "");
+  const fromR = parseInt(from.slice(0, 2), 16);
+  const fromG = parseInt(from.slice(2, 4), 16);
+  const fromB = parseInt(from.slice(4, 6), 16);
+  const toR = parseInt(to.slice(0, 2), 16);
+  const toG = parseInt(to.slice(2, 4), 16);
+  const toB = parseInt(to.slice(4, 6), 16);
+
+  const mix = (a, b) => Math.round(a + (b - a) * r);
+  const next = [mix(fromR, toR), mix(fromG, toG), mix(fromB, toB)]
+    .map((v) => v.toString(16).padStart(2, "0"))
+    .join("");
+  return `#${next}`;
+}
+
+function updateScrollGradient() {
+  const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+  const maxScroll = Math.max(document.documentElement.scrollHeight - window.innerHeight, 1);
+  const ratio = Math.min(scrollTop / maxScroll, 1);
+  const color = lerpColorHex("#e8f4ff", "#045a8d", ratio);
+  document.documentElement.style.setProperty("--scroll-marine", color);
 }
 
 function createFormattedSpan(raw) {
@@ -635,6 +663,13 @@ async function init() {
   refs.tabTalk.addEventListener("click", () => {
     switchViewMode("talk");
   });
+
+  refs.topButton.addEventListener("click", () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  window.addEventListener("scroll", updateScrollGradient, { passive: true });
+  updateScrollGradient();
 
   try {
     const rows = await fetchRows();

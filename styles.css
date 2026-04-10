@@ -11,7 +11,8 @@
 body {
   margin: 0;
   color: #1f2937;
-  background: #e8f6e8;
+  background: linear-gradient(180deg, #e8f4ff 0%, var(--scroll-marine, #e8f4ff) 100%);
+  transition: background 0.2s linear;
 }
 
 .page {
@@ -41,10 +42,17 @@ body {
   min-height: 1.2em;
 }
 
+.view-tabs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .view-tabs {
   display: inline-flex;
   gap: 6px;
-  margin-bottom: 8px;
 }
 
 .view-tab {
@@ -60,6 +68,18 @@ body {
   background: #dbeafe;
   border-color: #93c5fd;
   color: #1e40af;
+}
+
+.top-button {
+  border: none;
+  background: transparent;
+  color: #075985;
+  font-size: 0.84rem;
+  padding: 4px 2px;
+}
+
+.top-button:hover {
+  text-decoration: underline;
 }
 
 .notice {
@@ -97,6 +117,7 @@ body {
 
 .card-title-row {
   margin-bottom: 4px;
+  font-size: 14px;
 }
 
 .card-title-row a {
@@ -111,7 +132,7 @@ body {
 
 .card-meta-row {
   color: #475569;
-  font-size: 0.82rem;
+  font-size: 12px;
   white-space: nowrap;
 }
 

@@ -9,9 +9,12 @@
   <body>
     <main class="page">
       <section class="surface talk-area" aria-label="トーク集">
-        <div class="view-tabs" role="tablist" aria-label="表示モード切替">
-          <button id="tab-video" class="view-tab is-active" type="button" role="tab" aria-selected="true">動画単位</button>
-          <button id="tab-talk" class="view-tab" type="button" role="tab" aria-selected="false">トーク単位</button>
+        <div class="view-tabs-row">
+          <div class="view-tabs" role="tablist" aria-label="表示モード切替">
+            <button id="tab-video" class="view-tab is-active" type="button" role="tab" aria-selected="true">動画単位</button>
+            <button id="tab-talk" class="view-tab" type="button" role="tab" aria-selected="false">トーク単位</button>
+          </div>
+          <button id="top-button" class="top-button" type="button" aria-label="ページ先頭へ戻る">TOP</button>
         </div>
         <div id="notice" class="notice"></div>
         <div id="error" class="error" role="alert"></div>
