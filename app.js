@@ -3,11 +3,18 @@ const DATA_URL_CANDIDATES = configuredDataUrl
   ? [configuredDataUrl]
   : ["index/latest.json", "./index/latest.json", "/index/latest.json", "latest.json"];
 
+const SEARCH_INDEX_URL_CANDIDATES = DATA_URL_CANDIDATES
+  .map((url) => String(url || "").replace(/latest\.json$/, "search_index.json"))
+  .filter((url, index, self) => url && self.indexOf(url) === index);
+
 const state = {
   search: "",
   videos: [],
   talks: [],
   recommendation: null,
+  searchIndexStatus: "idle",
+  searchIndexError: "",
+  searchIndexPromise: null,
   skippedRows: 0,
   openVideoKeys: new Set(),
   openTalkKeys: new Set(),
@@ -104,14 +111,19 @@ function pushTokenSet(tokenSet, raw) {
 }
 
 function normalizeRow(row) {
+  const tags = Array.isArray(row?.tags)
+    ? row.tags.map((tag) => normalizeTag(tag)).filter(Boolean)
+    : splitTags(row["自動検出タグ"]);
+
   return {
-    title: text(row["タイトル"]),
-    date: text(row["日付"]),
-    url: text(row["URL"]),
-    section: text(row["大見出し"]),
-    sectionUrl: text(row["大見出しURL"]),
-    subsection: text(row["小見出し"]),
-    tags: splitTags(row["自動検出タグ"]),
+    id: text(row.id) || text(row["URL"]) || `${text(row["タイトル"])}::${text(row["日付"])}` ,
+    title: text(row.title || row["タイトル"]),
+    date: text(row.date || row["日付"]),
+    url: text(row.url || row["URL"]),
+    section: text(row.section || row["大見出し"]),
+    sectionUrl: text(row.section_url || row.sectionUrl || row["大見出しURL"]),
+    subsection: text(row.subsection || row["小見出し"]),
+    tags,
   };
 }
 
@@ -242,76 +254,6 @@ function groupTalks(rows) {
   }));
 }
 
-function buildVideoRecommendationEntries(videos) {
-  return videos.map((video) => {
-    const tokenSet = new Set();
-    pushTokenSet(tokenSet, video.title);
-    video.sections.forEach((section) => {
-      pushTokenSet(tokenSet, section.name);
-      section.subsections.slice(0, 6).forEach((sub) => pushTokenSet(tokenSet, sub.name));
-    });
-    video.tags.forEach((tag) => pushTokenSet(tokenSet, tag));
-
-    const leadSection = video.sections[0] || null;
-    const leadSubsection = leadSection?.subsections?.[0]?.name || "";
-    const leadSectionName = leadSection?.name || "";
-    return {
-      id: video.key,
-      title: leadSubsection || leadSectionName || video.title,
-      subtitle: leadSectionName || (video.date || "日付なし"),
-      date: parseDateValue(video.date),
-      tokens: Array.from(tokenSet).slice(0, 16),
-    };
-  });
-}
-
-function buildTalkRecommendationEntries(talks) {
-  return talks
-    .filter((talk) => !talk.hasSingingVideo)
-    .map((talk) => {
-    const tokenSet = new Set();
-    pushTokenSet(tokenSet, talk.name);
-    talk.subsections.slice(0, 8).forEach((sub) => {
-      pushTokenSet(tokenSet, sub.name);
-      pushTokenSet(tokenSet, sub.videoTitle);
-    });
-
-    const leadSubsection = talk.subsections[0]?.name || "";
-    return {
-      id: talk.key,
-      title: leadSubsection || talk.name,
-      subtitle: talk.name,
-      date: "",
-      tokens: Array.from(tokenSet).slice(0, 16),
-    };
-  });
-}
-
-function buildInvertedIndex(entries) {
-  const tokenMap = new Map();
-  const entryMap = new Map();
-  entries.forEach((entry) => {
-    entryMap.set(entry.id, entry);
-    entry.tokens.forEach((token) => {
-      if (!tokenMap.has(token)) tokenMap.set(token, []);
-      tokenMap.get(token).push(entry.id);
-    });
-  });
-  return { tokenMap, entryMap };
-}
-
-function buildRecommendationStore(videos, talks) {
-  // 軽量化ポイント:
-  // - token と inverted index を初回だけ作る
-  // - レコメンド時は token の一致候補だけを見る（全件走査を避ける）
-  const videoEntries = buildVideoRecommendationEntries(videos);
-  const talkEntries = buildTalkRecommendationEntries(talks);
-  return {
-    video: buildInvertedIndex(videoEntries),
-    talk: buildInvertedIndex(talkEntries),
-  };
-}
-
 function scoreRecommendations(store, currentId) {
   const current = store.entryMap.get(currentId);
   if (!current) return [];
@@ -376,6 +318,78 @@ function scoreRecommendations(store, currentId) {
     });
   }
   return related.slice(0, RECOMMEND_LIMIT);
+}
+
+
+function buildStoreByMode(modeData) {
+  const entries = Array.isArray(modeData?.entries) ? modeData.entries : [];
+  const inverted = modeData?.inverted_index && typeof modeData.inverted_index === "object"
+    ? modeData.inverted_index
+    : {};
+
+  const entryMap = new Map();
+  entries.forEach((entry) => {
+    const id = text(entry?.id);
+    if (!id) return;
+    entryMap.set(id, {
+      id,
+      title: text(entry?.title) || "タイトルなし",
+      subtitle: text(entry?.subtitle),
+      date: parseDateValue(entry?.date),
+      tokens: Array.isArray(entry?.tokens) ? entry.tokens.map((t) => normalizeToken(t)).filter(Boolean) : [],
+    });
+  });
+
+  const tokenMap = new Map();
+  Object.entries(inverted).forEach(([token, ids]) => {
+    const normalizedToken = normalizeToken(token);
+    if (!normalizedToken || !Array.isArray(ids)) return;
+    const filteredIds = ids.map((id) => text(id)).filter((id) => entryMap.has(id));
+    if (filteredIds.length) tokenMap.set(normalizedToken, filteredIds);
+  });
+
+  return { tokenMap, entryMap };
+}
+
+function buildRecommendationStoreFromSearchIndex(data) {
+  return {
+    video: buildStoreByMode(data?.video),
+    talk: buildStoreByMode(data?.talk),
+  };
+}
+
+async function loadSearchIndexIfNeeded() {
+  if (state.recommendation) return state.recommendation;
+  if (state.searchIndexPromise) return state.searchIndexPromise;
+
+  state.searchIndexStatus = "loading";
+  state.searchIndexError = "";
+
+  state.searchIndexPromise = (async () => {
+    let lastError = "";
+    for (const url of SEARCH_INDEX_URL_CANDIDATES) {
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        state.recommendation = buildRecommendationStoreFromSearchIndex(data);
+        state.searchIndexStatus = "ready";
+        return state.recommendation;
+      } catch (error) {
+        lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+
+    state.searchIndexStatus = "error";
+    state.searchIndexError = lastError || "search_index.json の読込に失敗しました";
+    return null;
+  })();
+
+  try {
+    return await state.searchIndexPromise;
+  } finally {
+    state.searchIndexPromise = null;
+  }
 }
 
 function parseSearch(raw) {
@@ -875,6 +889,8 @@ function render() {
   notes.push(isVideo ? "動画単位モード" : "トーク単位モード");
   if (search.mode === "tag") notes.push("タグ検索中（#付き）");
   if (search.mode === "normal") notes.push("通常検索中（タイトル/大見出し/小見出し）");
+  if (state.searchIndexStatus === "loading") notes.push("検索インデックス読込中…");
+  if (state.searchIndexStatus === "error") notes.push("検索インデックス読込失敗（検索は利用可）");
   refs.notice.textContent = notes.join(" / ");
 
   updateTabs();
@@ -896,7 +912,7 @@ async function fetchRows() {
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const rows = Array.isArray(data) ? data : data.rows;
+      const rows = Array.isArray(data) ? data : (Array.isArray(data.items) ? data.items : data.rows);
       if (!Array.isArray(rows)) throw new Error("JSON形式が不正です");
       return rows;
     } catch (error) {
@@ -982,6 +998,12 @@ function bindMobileScrollLock() {
 }
 
 async function init() {
+  refs.search.addEventListener("focus", () => {
+    if (state.searchIndexStatus === "idle") {
+      void loadSearchIndexIfNeeded();
+    }
+  }, { once: false });
+
   refs.search.addEventListener("input", (event) => {
     state.search = text(event.target.value);
     state.randomTalkKeys = null;
@@ -1046,7 +1068,6 @@ async function init() {
     state.videos = groupVideos(normalized);
     state.newVideoHighlightKeys = pickNewVideoHighlightKeys(state.videos);
     state.talks = groupTalks(normalized);
-    state.recommendation = buildRecommendationStore(state.videos, state.talks);
     render();
   } catch (error) {
     refs.error.textContent = error instanceof Error ? error.message : String(error);

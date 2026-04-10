@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Export sheet and upload to R2
+      - name: Export sheet and upload JSON files to R2
         env:
           PYTHONPATH: ${{ github.workspace }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
