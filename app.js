@@ -525,16 +525,16 @@ function updateTabs() {
 function updateServerStatus(mode, shownCount = 0) {
   refs.serverStatus.classList.remove("server-status--loading", "server-status--error", "server-status--ok");
   if (mode === "loading") {
-    refs.serverStatus.textContent = "読込中";
+    refs.serverStatus.textContent = "読込中…";
     refs.serverStatus.classList.add("server-status--loading");
     return;
   }
   if (mode === "error") {
-    refs.serverStatus.textContent = "エラー";
+    refs.serverStatus.textContent = "❕エラー";
     refs.serverStatus.classList.add("server-status--error");
     return;
   }
-  refs.serverStatus.textContent = `正常（${shownCount}件表示）`;
+  refs.serverStatus.textContent = `⚡稼働中(全${shownCount}件)`;
   refs.serverStatus.classList.add("server-status--ok");
 }
 
