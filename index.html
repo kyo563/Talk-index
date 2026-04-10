@@ -7,51 +7,31 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="container">
-      <header class="page-header">
-        <h1>Talk-index</h1>
-        <p>動画内トークを見出し構造で探せます。</p>
-      </header>
-
-      <section class="guide" aria-label="探索ガイド">
-        <article class="guide-card">
-          <h2>動画から探す</h2>
-          <p>気になる動画を先に選んで、大見出し・小見出しへ降ります。</p>
-        </article>
-        <article class="guide-card">
-          <h2>テーマから探す</h2>
-          <p>気になる話題を先に選んで、該当動画へ移動します。</p>
-        </article>
+    <main class="page">
+      <section class="surface talk-area" aria-label="トーク集">
+        <div id="result-meta" class="result-meta"></div>
+        <div id="notice" class="notice"></div>
+        <div id="error" class="error" role="alert"></div>
+        <section id="results" class="results" aria-live="polite"></section>
       </section>
 
-      <section class="controls">
-        <div class="tabs" role="tablist" aria-label="ビュー切替">
-          <button id="tab-video" class="tab is-active" data-view="video" role="tab" aria-selected="true">
-            動画から探す
-          </button>
-          <button id="tab-theme" class="tab" data-view="theme" role="tab" aria-selected="false">
-            テーマから探す
-          </button>
+      <section class="surface control-menu" aria-label="操作メニュー">
+        <div class="control-row top-row">
+          <div id="server-status" class="server-status">通信状態: 未確認</div>
+          <div class="menu-buttons">
+            <button id="expand-all" type="button">展開</button>
+            <button id="collapse-all" type="button">折り畳み</button>
+          </div>
         </div>
-
-        <label class="field">
-          <span>検索</span>
-          <input id="search" type="text" placeholder="タイトル / 大見出し / 小見出し / タグ" />
-        </label>
-
-        <label class="field">
-          <span id="sort-label">並べ替え（動画単位）</span>
-          <select id="sort"></select>
-        </label>
+        <div class="control-row">
+          <input
+            id="search"
+            type="text"
+            placeholder="検索（タイトル/大見出し/小見出し、タグは #キーワード）"
+            aria-label="検索"
+          />
+        </div>
       </section>
-
-      <section class="status" aria-live="polite">
-        <p id="result-meta" class="result-meta"></p>
-        <p id="notice" class="notice"></p>
-        <p id="error" class="error" role="alert"></p>
-      </section>
-
-      <section id="results" class="results" aria-live="polite"></section>
     </main>
 
     <script>
