@@ -6,9 +6,13 @@ const DATA_URL_CANDIDATES = configuredDataUrl
 const state = {
   search: "",
   videos: [],
+  talks: [],
   skippedRows: 0,
   openVideoKeys: new Set(),
+  openTalkKeys: new Set(),
+  viewMode: "video",
   randomSection: "",
+  randomTalkKeys: null,
 };
 
 const refs = {
@@ -20,6 +24,8 @@ const refs = {
   toggleAll: document.getElementById("toggle-all"),
   clearSearch: document.getElementById("clear-search"),
   randomSection: document.getElementById("random-section"),
+  tabVideo: document.getElementById("tab-video"),
+  tabTalk: document.getElementById("tab-talk"),
 };
 
 function text(value) {
@@ -122,6 +128,38 @@ function groupVideos(rows) {
   }));
 }
 
+function isTalkSectionVisible(name) {
+  return name !== "【オープニングトーク】" && name !== "【エンディングトーク】";
+}
+
+function groupTalks(rows) {
+  const bySection = new Map();
+
+  rows.forEach((row) => {
+    if (!row.section || !isTalkSectionVisible(row.section)) return;
+
+    if (!bySection.has(row.section)) {
+      bySection.set(row.section, {
+        key: row.section,
+        name: row.section,
+        sectionUrl: row.sectionUrl,
+        subsections: new Set(),
+      });
+    }
+
+    if (row.subsection) {
+      bySection.get(row.section).subsections.add(row.subsection);
+    }
+  });
+
+  return Array.from(bySection.values()).map((talk) => ({
+    key: talk.key,
+    name: talk.name,
+    sectionUrl: talk.sectionUrl,
+    subsections: Array.from(talk.subsections),
+  }));
+}
+
 function parseSearch(raw) {
   const q = text(raw).toLowerCase();
   if (!q) return { mode: "none", keyword: "" };
@@ -148,6 +186,14 @@ function hitVideo(video, search) {
   });
 }
 
+function hitTalk(talk, search) {
+  if (search.mode === "none") return true;
+  if (!search.keyword) return true;
+  if (search.mode === "tag") return false;
+  if (includesKeyword(talk.name, search.keyword)) return true;
+  return talk.subsections.some((sub) => includesKeyword(sub, search.keyword));
+}
+
 function createAnchor(href, label) {
   const a = document.createElement("a");
   a.href = href;
@@ -158,8 +204,18 @@ function createAnchor(href, label) {
 }
 
 function updateToggleAllButton() {
-  const allOpen = state.videos.length > 0 && state.openVideoKeys.size === state.videos.length;
+  const total = state.viewMode === "video" ? state.videos.length : state.talks.length;
+  const openCount = state.viewMode === "video" ? state.openVideoKeys.size : state.openTalkKeys.size;
+  const allOpen = total > 0 && openCount === total;
   refs.toggleAll.textContent = allOpen ? "全て折り畳み" : "全て展開";
+}
+
+function updateTabs() {
+  const isVideo = state.viewMode === "video";
+  refs.tabVideo.classList.toggle("is-active", isVideo);
+  refs.tabTalk.classList.toggle("is-active", !isVideo);
+  refs.tabVideo.setAttribute("aria-selected", isVideo ? "true" : "false");
+  refs.tabTalk.setAttribute("aria-selected", isVideo ? "false" : "true");
 }
 
 function updateServerStatus(mode, shownCount = 0) {
@@ -312,20 +368,92 @@ function renderCards(videos) {
   });
 }
 
+function renderTalkCards(talks) {
+  if (!talks.length) return renderNoResult();
+
+  refs.results.innerHTML = "";
+
+  talks.forEach((talk) => {
+    const card = document.createElement("article");
+    card.className = "card";
+    card.dataset.key = talk.key;
+    if (state.openTalkKeys.has(talk.key)) card.classList.add("is-open");
+
+    const summary = document.createElement("div");
+    summary.className = "card-summary";
+
+    const main = document.createElement("div");
+    main.className = "card-main";
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "card-title-row";
+    if (talk.sectionUrl && isValidHttpUrl(talk.sectionUrl)) {
+      titleRow.appendChild(createAnchor(talk.sectionUrl, talk.name));
+    } else {
+      titleRow.textContent = talk.name;
+    }
+
+    const metaRow = document.createElement("div");
+    metaRow.className = "card-meta-row";
+    metaRow.textContent = `小見出し ${talk.subsections.length}件`;
+
+    main.append(titleRow, metaRow);
+    summary.appendChild(main);
+
+    const detail = document.createElement("div");
+    detail.className = "card-detail";
+
+    const subList = document.createElement("ul");
+    subList.className = "sub-list is-open";
+    talk.subsections.forEach((sub) => {
+      const li = document.createElement("li");
+      li.textContent = `- ${sub}`;
+      subList.appendChild(li);
+    });
+    detail.appendChild(subList);
+
+    summary.addEventListener("click", () => {
+      if (state.openTalkKeys.has(talk.key)) {
+        state.openTalkKeys.delete(talk.key);
+      } else {
+        state.openTalkKeys.add(talk.key);
+      }
+      card.classList.toggle("is-open");
+      updateToggleAllButton();
+    });
+
+    card.append(summary, detail);
+    refs.results.appendChild(card);
+  });
+}
+
 function render() {
   const search = parseSearch(state.search);
-  const filtered = state.videos.filter((video) => hitVideo(video, search));
+  const isVideo = state.viewMode === "video";
+  let filtered = isVideo
+    ? state.videos.filter((video) => hitVideo(video, search))
+    : state.talks.filter((talk) => hitTalk(talk, search));
+
+  if (!isVideo && state.randomTalkKeys) {
+    filtered = filtered.filter((talk) => state.randomTalkKeys.has(talk.key));
+  }
 
   const notes = [];
   if (state.skippedRows > 0) notes.push(`${state.skippedRows}件の不正データをスキップしました`);
   if (state.randomSection) notes.push(`ランダムおすすめ: ${state.randomSection}`);
+  notes.push(isVideo ? "動画単位モード" : "トーク単位モード");
   if (search.mode === "tag") notes.push("タグ検索中（#付き）");
   if (search.mode === "normal") notes.push("通常検索中（タイトル/大見出し/小見出し）");
   refs.notice.textContent = notes.join(" / ");
 
+  updateTabs();
   updateServerStatus("ok", filtered.length);
   updateToggleAllButton();
-  renderCards(filtered);
+  if (isVideo) {
+    renderCards(filtered);
+  } else {
+    renderTalkCards(filtered);
+  }
 }
 
 async function fetchRows() {
@@ -349,42 +477,77 @@ async function fetchRows() {
 }
 
 function pickRandomSection() {
-  const sections = state.videos.flatMap((video) => video.sections.map((sec) => sec.name)).filter(Boolean);
-  if (!sections.length) {
+  if (!state.talks.length) {
     state.randomSection = "候補なし";
     render();
     return;
   }
-  const index = Math.floor(Math.random() * sections.length);
-  state.randomSection = sections[index];
+
+  const pool = [...state.talks];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  const picked = pool.slice(0, 4);
+  state.viewMode = "talk";
+  state.search = "";
+  refs.search.value = "";
+  state.randomTalkKeys = new Set(picked.map((item) => item.key));
+  state.randomSection = `トーク見出しを${picked.length}件表示中`;
   render();
 }
 
 async function init() {
   refs.search.addEventListener("input", (event) => {
     state.search = text(event.target.value);
+    state.randomTalkKeys = null;
     render();
   });
 
   refs.clearSearch.addEventListener("click", () => {
     state.search = "";
     refs.search.value = "";
+    state.randomTalkKeys = null;
     render();
     refs.search.focus();
   });
 
   refs.toggleAll.addEventListener("click", () => {
-    const allOpen = state.videos.length > 0 && state.openVideoKeys.size === state.videos.length;
-    if (allOpen) {
-      state.openVideoKeys.clear();
+    if (state.viewMode === "video") {
+      const allOpen = state.videos.length > 0 && state.openVideoKeys.size === state.videos.length;
+      if (allOpen) {
+        state.openVideoKeys.clear();
+      } else {
+        state.openVideoKeys = new Set(state.videos.map((v) => v.key));
+      }
     } else {
-      state.openVideoKeys = new Set(state.videos.map((v) => v.key));
+      const allOpen = state.talks.length > 0 && state.openTalkKeys.size === state.talks.length;
+      if (allOpen) {
+        state.openTalkKeys.clear();
+      } else {
+        state.openTalkKeys = new Set(state.talks.map((talk) => talk.key));
+      }
     }
     render();
   });
 
   refs.randomSection.addEventListener("click", () => {
     pickRandomSection();
+  });
+
+  refs.tabVideo.addEventListener("click", () => {
+    state.viewMode = "video";
+    state.randomTalkKeys = null;
+    state.randomSection = "";
+    render();
+  });
+
+  refs.tabTalk.addEventListener("click", () => {
+    state.viewMode = "talk";
+    state.randomTalkKeys = null;
+    state.randomSection = "";
+    render();
   });
 
   try {
@@ -401,6 +564,7 @@ async function init() {
     });
 
     state.videos = groupVideos(normalized);
+    state.talks = groupTalks(normalized);
     render();
   } catch (error) {
     refs.error.textContent = error instanceof Error ? error.message : String(error);
