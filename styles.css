@@ -13,6 +13,26 @@ body {
   color: #1f2937;
   background: linear-gradient(180deg, #e8f4ff 0%, var(--scroll-marine, #e8f4ff) 100%);
   transition: background 0.2s linear;
+  --ambient-wave-opacity: 0.1;
+  --ambient-wave-scale: 1;
+  --on-air-opacity: 0.45;
+}
+
+body[data-ambient-tone="night"] {
+  --ambient-wave-opacity: 0.16;
+  --ambient-wave-scale: 1.015;
+}
+
+body[data-ambient-tone="lively"] {
+  --ambient-wave-opacity: 0.18;
+  --ambient-wave-scale: 1.02;
+  --on-air-opacity: 0.7;
+}
+
+body[data-ambient-tone="calm"] {
+  --ambient-wave-opacity: 0.08;
+  --ambient-wave-scale: 1;
+  --on-air-opacity: 0.35;
 }
 
 .page {
@@ -20,6 +40,60 @@ body {
   margin: 0 auto;
   min-height: 100vh;
   padding: 12px 12px 104px;
+}
+
+.ambient-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 20px;
+  margin-bottom: 8px;
+  pointer-events: none;
+}
+
+.ambient-wave {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(14, 116, 144, 0) 0,
+      rgba(14, 116, 144, 0.14) 6%,
+      rgba(14, 116, 144, 0) 12%
+    );
+  opacity: var(--ambient-wave-opacity);
+  transform: scaleX(var(--ambient-wave-scale));
+  animation: wave-slide 34s linear infinite;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.on-air-badge {
+  position: absolute;
+  right: 6px;
+  top: 1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  background: rgba(15, 23, 42, 0.78);
+  color: #f8fafc;
+  opacity: var(--on-air-opacity);
+  transition: opacity 0.2s ease;
+}
+
+.on-air-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fb7185;
+  animation: on-air-blink 2.8s ease-in-out infinite;
+}
+
+.on-air-label {
+  letter-spacing: 0.08em;
 }
 
 .surface {
@@ -101,6 +175,13 @@ body {
   border-radius: 10px;
   background: #fff;
   overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover,
+.card:focus-within {
+  border-color: #bae6fd;
+  box-shadow: 0 1px 7px rgba(14, 116, 144, 0.12);
 }
 
 .card-summary {
@@ -247,6 +328,103 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.recommend {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #dbeafe;
+}
+
+.recommend-title {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  color: #0f172a;
+}
+
+.recommend-empty {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #64748b;
+}
+
+.recommend-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.recommend-item {
+  animation: recommend-rise 0.26s ease both;
+}
+
+.recommend-button {
+  width: 100%;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #f8fdff;
+  color: #0f172a;
+  text-align: left;
+}
+
+.recommend-main {
+  display: block;
+  font-size: 0.84rem;
+  margin-bottom: 2px;
+}
+
+.recommend-sub {
+  display: block;
+  font-size: 0.74rem;
+  color: #64748b;
+}
+
+.recommend-reason {
+  display: block;
+  font-size: 0.72rem;
+  color: #0e7490;
+}
+
+@keyframes wave-slide {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: 340px;
+  }
+}
+
+@keyframes on-air-blink {
+  0%, 100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes recommend-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 演出を強くしすぎないための安全弁:
+   ここを上げると主張が強くなるため、opacity と duration の変更は小さく保つ。 */
+@media (prefers-reduced-motion: reduce) {
+  .ambient-wave,
+  .on-air-dot,
+  .recommend-item {
+    animation: none;
+  }
 }
 
 .tag {

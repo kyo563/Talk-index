@@ -7,6 +7,7 @@ const state = {
   search: "",
   videos: [],
   talks: [],
+  recommendation: null,
   skippedRows: 0,
   openVideoKeys: new Set(),
   openTalkKeys: new Set(),
@@ -14,6 +15,27 @@ const state = {
   randomSection: "",
   randomTalkKeys: null,
 };
+
+const RECOMMEND_LIMIT = 3;
+const TOKEN_STOP_WORDS = new Set([
+  "の",
+  "こと",
+  "です",
+  "ます",
+  "する",
+  "した",
+  "いる",
+  "ある",
+  "なる",
+  "よう",
+  "ため",
+  "話",
+  "の話",
+  "配信の話",
+  "雑談の話",
+  "について",
+  "そして",
+]);
 
 const refs = {
   search: document.getElementById("search"),
@@ -42,6 +64,39 @@ function splitTags(raw) {
     .split(",")
     .map((item) => normalizeTag(item))
     .filter(Boolean);
+}
+
+function parseDateValue(raw) {
+  const v = text(raw);
+  if (!v) return "";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function normalizeToken(rawToken) {
+  const token = text(rawToken).toLowerCase();
+  if (!token) return "";
+  if (TOKEN_STOP_WORDS.has(token)) return "";
+  if (token.endsWith("の話")) return normalizeToken(token.slice(0, -2));
+  if (token.length <= 1 && !/^\d+$/.test(token)) return "";
+  return token;
+}
+
+function tokenizeText(raw) {
+  const src = text(raw);
+  if (!src) return [];
+  const words = src.match(/[一-龠ぁ-んァ-ヶーa-zA-Z0-9]+/g) || [];
+  const unique = new Set();
+  words.forEach((word) => {
+    const token = normalizeToken(word);
+    if (token) unique.add(token);
+  });
+  return Array.from(unique);
+}
+
+function pushTokenSet(tokenSet, raw) {
+  tokenizeText(raw).forEach((token) => tokenSet.add(token));
 }
 
 function normalizeRow(row) {
@@ -167,6 +222,113 @@ function groupTalks(rows) {
     sectionUrl: talk.sectionUrl,
     subsections: talk.subsections,
   }));
+}
+
+function buildVideoRecommendationEntries(videos) {
+  return videos.map((video) => {
+    const tokenSet = new Set();
+    pushTokenSet(tokenSet, video.title);
+    video.sections.forEach((section) => {
+      pushTokenSet(tokenSet, section.name);
+      section.subsections.slice(0, 6).forEach((sub) => pushTokenSet(tokenSet, sub.name));
+    });
+    video.tags.forEach((tag) => pushTokenSet(tokenSet, tag));
+
+    return {
+      id: video.key,
+      title: video.title,
+      subtitle: video.date || "日付なし",
+      date: parseDateValue(video.date),
+      tokens: Array.from(tokenSet).slice(0, 16),
+    };
+  });
+}
+
+function buildTalkRecommendationEntries(talks) {
+  return talks.map((talk) => {
+    const tokenSet = new Set();
+    pushTokenSet(tokenSet, talk.name);
+    talk.subsections.slice(0, 8).forEach((sub) => {
+      pushTokenSet(tokenSet, sub.name);
+      pushTokenSet(tokenSet, sub.videoTitle);
+    });
+
+    return {
+      id: talk.key,
+      title: talk.name,
+      subtitle: `小見出し ${talk.subsections.length}件`,
+      date: "",
+      tokens: Array.from(tokenSet).slice(0, 16),
+    };
+  });
+}
+
+function buildInvertedIndex(entries) {
+  const tokenMap = new Map();
+  const entryMap = new Map();
+  entries.forEach((entry) => {
+    entryMap.set(entry.id, entry);
+    entry.tokens.forEach((token) => {
+      if (!tokenMap.has(token)) tokenMap.set(token, []);
+      tokenMap.get(token).push(entry.id);
+    });
+  });
+  return { tokenMap, entryMap };
+}
+
+function buildRecommendationStore(videos, talks) {
+  // 軽量化ポイント:
+  // - token と inverted index を初回だけ作る
+  // - レコメンド時は token の一致候補だけを見る（全件走査を避ける）
+  const videoEntries = buildVideoRecommendationEntries(videos);
+  const talkEntries = buildTalkRecommendationEntries(talks);
+  return {
+    video: buildInvertedIndex(videoEntries),
+    talk: buildInvertedIndex(talkEntries),
+  };
+}
+
+function scoreRecommendations(store, currentId) {
+  const current = store.entryMap.get(currentId);
+  if (!current) return [];
+
+  const scored = new Map();
+
+  current.tokens.forEach((token) => {
+    const ids = store.tokenMap.get(token) || [];
+    ids.forEach((id) => {
+      if (id === currentId) return;
+      if (!scored.has(id)) {
+        scored.set(id, { id, score: 0, overlap: new Set(), reason: "" });
+      }
+      const item = scored.get(id);
+      item.score += 2;
+      item.overlap.add(token);
+    });
+  });
+
+  scored.forEach((item) => {
+    const candidate = store.entryMap.get(item.id);
+    if (!candidate) return;
+    if (current.date && candidate.date && current.date === candidate.date) {
+      item.score += 0.5;
+      item.reason = "同時期";
+    }
+    if (!item.reason) item.reason = `共通トークン ${item.overlap.size}件`;
+    if (item.overlap.size >= 2) item.reason = "同じタグ/話題";
+
+    // 将来拡張:
+    // score に「同一配信」などの軽い加点を増やせる。
+    // ただし重くなるため、全件比較や高度NLPは入れないこと。
+    item.title = candidate.title;
+    item.subtitle = candidate.subtitle;
+    item.overlapCount = item.overlap.size;
+  });
+
+  return Array.from(scored.values())
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || b.overlapCount - a.overlapCount)
+    .slice(0, RECOMMEND_LIMIT);
 }
 
 function parseSearch(raw) {
@@ -337,6 +499,70 @@ function renderNoResult() {
   refs.results.innerHTML = "<p>条件に一致する動画がありません</p>";
 }
 
+function pickAmbientTone(values) {
+  const joined = values.map((v) => text(v)).join(" ").toLowerCase();
+  if (/爆笑|笑い|神回|ハイテンション/.test(joined)) return "lively";
+  if (/深夜|チル|まったり|海|波|ラジオ/.test(joined)) return "night";
+  if (/しんみり|悩み|相談/.test(joined)) return "calm";
+  return "base";
+}
+
+function createRecommendationBlock(items, mode) {
+  const wrap = document.createElement("section");
+  wrap.className = "recommend";
+
+  const title = document.createElement("h4");
+  title.className = "recommend-title";
+  title.textContent = "次に見そうな話題";
+  wrap.appendChild(title);
+
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "recommend-empty";
+    empty.textContent = "関連候補は準備中です";
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  const list = document.createElement("ul");
+  list.className = "recommend-list";
+  items.forEach((item, index) => {
+    const li = document.createElement("li");
+    li.className = "recommend-item";
+    li.style.animationDelay = `${index * 60}ms`;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "recommend-button";
+    button.innerHTML = `<span class="recommend-main">${item.title}</span><span class="recommend-sub">${item.subtitle}</span><span class="recommend-reason">${item.reason}</span>`;
+    button.addEventListener("click", () => {
+      openCardFromRecommendation(mode, item.id);
+    });
+
+    li.appendChild(button);
+    list.appendChild(li);
+  });
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function openCardFromRecommendation(mode, key) {
+  if (mode === "video") {
+    state.viewMode = "video";
+    state.openVideoKeys.add(key);
+  } else {
+    state.viewMode = "talk";
+    state.openTalkKeys.add(key);
+  }
+  state.randomTalkKeys = null;
+  state.randomSection = "";
+  render();
+  requestAnimationFrame(() => {
+    const card = refs.results.querySelector(`.card[data-key="${CSS.escape(key)}"]`);
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
 function renderCards(videos) {
   if (!videos.length) return renderNoResult();
 
@@ -346,6 +572,7 @@ function renderCards(videos) {
     const card = document.createElement("article");
     card.className = "card";
     card.dataset.key = video.key;
+    card.dataset.tone = pickAmbientTone([video.title, ...video.tags, ...video.sections.map((sec) => sec.name)]);
     if (state.openVideoKeys.has(video.key)) card.classList.add("is-open");
 
     const summary = document.createElement("div");
@@ -457,6 +684,10 @@ function renderCards(videos) {
     }
 
     detail.append(sectionList, tags);
+    if (state.recommendation) {
+      const recommendations = scoreRecommendations(state.recommendation.video, video.key);
+      detail.appendChild(createRecommendationBlock(recommendations, "video"));
+    }
 
     summary.addEventListener("click", () => {
       if (state.openVideoKeys.has(video.key)) {
@@ -482,6 +713,7 @@ function renderTalkCards(talks) {
     const card = document.createElement("article");
     card.className = "card";
     card.dataset.key = talk.key;
+    card.dataset.tone = pickAmbientTone([talk.name, ...talk.subsections.map((sub) => sub.name)]);
     if (state.openTalkKeys.has(talk.key)) card.classList.add("is-open");
 
     const summary = document.createElement("div");
@@ -536,6 +768,10 @@ function renderTalkCards(talks) {
       subList.appendChild(li);
     });
     detail.appendChild(subList);
+    if (state.recommendation) {
+      const recommendations = scoreRecommendations(state.recommendation.talk, talk.key);
+      detail.appendChild(createRecommendationBlock(recommendations, "talk"));
+    }
 
     summary.addEventListener("click", () => {
       if (state.openTalkKeys.has(talk.key)) {
@@ -640,6 +876,22 @@ function switchViewMode(mode) {
   render();
 }
 
+function bindAmbientReactions() {
+  const setToneFromElement = (target) => {
+    const card = target?.closest?.(".card");
+    document.body.dataset.ambientTone = card?.dataset?.tone || "base";
+  };
+
+  refs.results.addEventListener("mouseover", (event) => setToneFromElement(event.target));
+  refs.results.addEventListener("focusin", (event) => setToneFromElement(event.target));
+  refs.results.addEventListener("mouseout", () => {
+    document.body.dataset.ambientTone = "base";
+  });
+  refs.results.addEventListener("focusout", () => {
+    document.body.dataset.ambientTone = "base";
+  });
+}
+
 async function init() {
   refs.search.addEventListener("input", (event) => {
     state.search = text(event.target.value);
@@ -678,6 +930,7 @@ async function init() {
 
   window.addEventListener("scroll", updateScrollGradient, { passive: true });
   updateScrollGradient();
+  bindAmbientReactions();
 
   try {
     const rows = await fetchRows();
@@ -694,6 +947,7 @@ async function init() {
 
     state.videos = groupVideos(normalized);
     state.talks = groupTalks(normalized);
+    state.recommendation = buildRecommendationStore(state.videos, state.talks);
     render();
   } catch (error) {
     refs.error.textContent = error instanceof Error ? error.message : String(error);
