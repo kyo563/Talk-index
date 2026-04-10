@@ -204,22 +204,29 @@ function renderCards(videos) {
     const sectionList = document.createElement("div");
     sectionList.className = "section-list";
 
-    video.sections.forEach((sec, i) => {
+    video.sections.forEach((sec) => {
       const item = document.createElement("div");
       item.className = "section-item";
 
       const head = document.createElement("div");
       head.className = "section-head";
 
-      const toggle = document.createElement("button");
-      toggle.className = "section-toggle";
-      toggle.type = "button";
-      toggle.setAttribute("aria-expanded", "false");
-      toggle.textContent = "▶";
+      const hasSubsections = sec.subsections.length > 0;
+      let toggle;
+      if (hasSubsections) {
+        toggle = document.createElement("button");
+        toggle.className = "section-toggle";
+        toggle.type = "button";
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.textContent = "▶";
+      } else {
+        toggle = document.createElement("span");
+        toggle.className = "section-toggle-placeholder";
+      }
 
       const label = sec.sectionUrl && isValidHttpUrl(sec.sectionUrl)
-        ? createAnchor(sec.sectionUrl, `大見出し${i + 1}: ${sec.name}`)
-        : document.createTextNode(`大見出し${i + 1}: ${sec.name}`);
+        ? createAnchor(sec.sectionUrl, sec.name)
+        : document.createTextNode(sec.name);
 
       if (label instanceof Node && label.nodeType === Node.TEXT_NODE) {
         const span = document.createElement("span");
@@ -238,12 +245,14 @@ function renderCards(videos) {
         subList.appendChild(li);
       });
 
-      toggle.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const open = subList.classList.toggle("is-open");
-        toggle.textContent = open ? "▼" : "▶";
-        toggle.setAttribute("aria-expanded", open ? "true" : "false");
-      });
+      if (hasSubsections) {
+        toggle.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const open = subList.classList.toggle("is-open");
+          toggle.textContent = open ? "▼" : "▶";
+          toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+      }
 
       item.append(head, subList);
       sectionList.appendChild(item);

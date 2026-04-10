@@ -30,6 +30,9 @@ body {
 
 .talk-area {
   min-height: 60vh;
+  background: transparent;
+  border: none;
+  padding: 0;
 }
 
 .result-meta,
@@ -128,13 +131,22 @@ body {
 }
 
 .section-toggle {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  border-radius: 6px;
+  border: none;
+  background: transparent;
   width: 24px;
   height: 24px;
+  flex: 0 0 24px;
   line-height: 1;
   cursor: pointer;
+  padding: 0;
+  color: #475569;
+}
+
+.section-toggle-placeholder {
+  width: 24px;
+  height: 24px;
+  display: inline-block;
+  flex: 0 0 24px;
 }
 
 .section-link {
