@@ -185,7 +185,7 @@ function groupVideos(rows) {
 }
 
 function isTalkSectionVisible(name) {
-  return name !== "【オープニングトーク】" && name !== "【エンディングトーク】";
+  return name !== "【オープニングトーク】" && name !== "【エンディングトーク】" && name !== "【開場】";
 }
 
 function ensureTalkSection(bySection, row) {
@@ -195,9 +195,19 @@ function ensureTalkSection(bySection, row) {
       name: row.section,
       sectionUrl: row.sectionUrl,
       subsections: [],
+      thumb: "",
+      hasSingingVideo: false,
     });
   }
   return bySection.get(row.section);
+}
+
+function hasSingingTag(tags) {
+  return tags.some((tag) => tag === "歌枠" || tag === "#歌枠");
+}
+
+function isSingingVideoRow(row) {
+  return text(row.title).includes("#歌枠") || hasSingingTag(row.tags);
 }
 
 function groupTalks(rows) {
@@ -206,6 +216,8 @@ function groupTalks(rows) {
   rows.forEach((row) => {
     if (!row.section || !isTalkSectionVisible(row.section)) return;
     const talk = ensureTalkSection(bySection, row);
+    if (!talk.thumb && row.url) talk.thumb = thumbnailUrl(row.url);
+    if (isSingingVideoRow(row)) talk.hasSingingVideo = true;
 
     if (row.subsection) {
       talk.subsections.push({
@@ -220,6 +232,8 @@ function groupTalks(rows) {
     key: talk.key,
     name: talk.name,
     sectionUrl: talk.sectionUrl,
+    thumb: talk.thumb,
+    hasSingingVideo: talk.hasSingingVideo,
     subsections: talk.subsections,
   }));
 }
@@ -248,7 +262,9 @@ function buildVideoRecommendationEntries(videos) {
 }
 
 function buildTalkRecommendationEntries(talks) {
-  return talks.map((talk) => {
+  return talks
+    .filter((talk) => !talk.hasSingingVideo)
+    .map((talk) => {
     const tokenSet = new Set();
     pushTokenSet(tokenSet, talk.name);
     talk.subsections.slice(0, 8).forEach((sub) => {
@@ -757,7 +773,20 @@ function renderTalkCards(talks) {
     metaRow.textContent = `小見出し ${talk.subsections.length}件`;
 
     main.append(titleRow, metaRow);
-    summary.appendChild(main);
+
+    const side = document.createElement("div");
+    side.className = "card-side";
+
+    const thumb = document.createElement("img");
+    thumb.className = "thumbnail";
+    thumb.alt = "サムネイル";
+    thumb.loading = "lazy";
+    if (talk.thumb) {
+      thumb.src = talk.thumb;
+    }
+
+    side.appendChild(thumb);
+    summary.append(main, side);
 
     const detail = document.createElement("div");
     detail.className = "card-detail";
