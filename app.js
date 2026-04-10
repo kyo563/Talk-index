@@ -364,9 +364,12 @@ function renderCards(videos) {
 
     const metaRow = document.createElement("div");
     metaRow.className = "card-meta-row";
-    metaRow.textContent = `${video.date || "日付なし"} / ${video.sections.length}件`;
+    metaRow.textContent = `${video.sections.length}件`;
 
     main.append(titleRow, metaRow);
+
+    const side = document.createElement("div");
+    side.className = "card-side";
 
     const thumb = document.createElement("img");
     thumb.className = "thumbnail";
@@ -376,7 +379,12 @@ function renderCards(videos) {
       thumb.src = video.thumb;
     }
 
-    summary.append(main, thumb);
+    const dateCorner = document.createElement("div");
+    dateCorner.className = "card-date-corner";
+    dateCorner.textContent = video.date || "日付なし";
+
+    side.append(thumb, dateCorner);
+    summary.append(main, side);
 
     const detail = document.createElement("div");
     detail.className = "card-detail";
