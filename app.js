@@ -8,28 +8,32 @@ const state = {
   videos: [],
   skippedRows: 0,
   openVideoKeys: new Set(),
-  lastScrollY: 0,
+  randomSection: "",
 };
 
 const refs = {
   search: document.getElementById("search"),
-  resultMeta: document.getElementById("result-meta"),
   notice: document.getElementById("notice"),
   error: document.getElementById("error"),
   results: document.getElementById("results"),
   serverStatus: document.getElementById("server-status"),
-  expandAll: document.getElementById("expand-all"),
-  collapseAll: document.getElementById("collapse-all"),
+  toggleAll: document.getElementById("toggle-all"),
+  clearSearch: document.getElementById("clear-search"),
+  randomSection: document.getElementById("random-section"),
 };
 
 function text(value) {
   return String(value || "").trim();
 }
 
+function normalizeTag(tag) {
+  return text(tag).replace(/^#+/, "").trim();
+}
+
 function splitTags(raw) {
   return text(raw)
     .split(",")
-    .map((item) => item.trim())
+    .map((item) => normalizeTag(item))
     .filter(Boolean);
 }
 
@@ -151,6 +155,23 @@ function createAnchor(href, label) {
   a.rel = "noopener noreferrer";
   a.textContent = label;
   return a;
+}
+
+function updateToggleAllButton() {
+  const allOpen = state.videos.length > 0 && state.openVideoKeys.size === state.videos.length;
+  refs.toggleAll.textContent = allOpen ? "全て折り畳み" : "全て展開";
+}
+
+function updateServerStatus(mode, shownCount = 0) {
+  if (mode === "loading") {
+    refs.serverStatus.textContent = "通信状態: 読込中";
+    return;
+  }
+  if (mode === "error") {
+    refs.serverStatus.textContent = "通信状態: サーバーエラー";
+    return;
+  }
+  refs.serverStatus.textContent = `通信状態: 正常稼働中（${shownCount}件表示）`;
 }
 
 function renderNoResult() {
@@ -283,6 +304,7 @@ function renderCards(videos) {
         state.openVideoKeys.add(video.key);
       }
       card.classList.toggle("is-open");
+      updateToggleAllButton();
     });
 
     card.append(summary, detail);
@@ -294,34 +316,48 @@ function render() {
   const search = parseSearch(state.search);
   const filtered = state.videos.filter((video) => hitVideo(video, search));
 
-  refs.resultMeta.textContent = `${filtered.length}件表示 / 全${state.videos.length}件`;
-  refs.notice.textContent =
-    search.mode === "tag"
-      ? "タグ検索中（#付き）"
-      : search.mode === "normal"
-        ? "通常検索中（タイトル/大見出し/小見出し）"
-        : "";
+  const notes = [];
+  if (state.skippedRows > 0) notes.push(`${state.skippedRows}件の不正データをスキップしました`);
+  if (state.randomSection) notes.push(`ランダムおすすめ: ${state.randomSection}`);
+  if (search.mode === "tag") notes.push("タグ検索中（#付き）");
+  if (search.mode === "normal") notes.push("通常検索中（タイトル/大見出し/小見出し）");
+  refs.notice.textContent = notes.join(" / ");
 
+  updateServerStatus("ok", filtered.length);
+  updateToggleAllButton();
   renderCards(filtered);
 }
 
 async function fetchRows() {
   let lastError = "";
+  updateServerStatus("loading");
+
   for (const url of DATA_URL_CANDIDATES) {
     try {
-      refs.serverStatus.textContent = `通信状態: 取得中 (${url})`;
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const rows = Array.isArray(data) ? data : data.rows;
       if (!Array.isArray(rows)) throw new Error("JSON形式が不正です");
-      refs.serverStatus.textContent = `通信状態: 正常 (${url})`;
       return rows;
     } catch (error) {
       lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
+
   throw new Error(`データ取得に失敗しました。${lastError}`);
+}
+
+function pickRandomSection() {
+  const sections = state.videos.flatMap((video) => video.sections.map((sec) => sec.name)).filter(Boolean);
+  if (!sections.length) {
+    state.randomSection = "候補なし";
+    render();
+    return;
+  }
+  const index = Math.floor(Math.random() * sections.length);
+  state.randomSection = sections[index];
+  render();
 }
 
 async function init() {
@@ -330,25 +366,25 @@ async function init() {
     render();
   });
 
-  refs.expandAll.addEventListener("click", () => {
-    state.openVideoKeys = new Set(state.videos.map((v) => v.key));
+  refs.clearSearch.addEventListener("click", () => {
+    state.search = "";
+    refs.search.value = "";
     render();
+    refs.search.focus();
   });
 
-  refs.collapseAll.addEventListener("click", () => {
-    state.openVideoKeys.clear();
-    render();
-  });
-
-  window.addEventListener("scroll", () => {
-    const nowY = window.scrollY;
-    if (Math.abs(nowY - state.lastScrollY) >= window.innerHeight) {
-      if (state.openVideoKeys.size > 0) {
-        state.openVideoKeys.clear();
-        render();
-      }
-      state.lastScrollY = nowY;
+  refs.toggleAll.addEventListener("click", () => {
+    const allOpen = state.videos.length > 0 && state.openVideoKeys.size === state.videos.length;
+    if (allOpen) {
+      state.openVideoKeys.clear();
+    } else {
+      state.openVideoKeys = new Set(state.videos.map((v) => v.key));
     }
+    render();
+  });
+
+  refs.randomSection.addEventListener("click", () => {
+    pickRandomSection();
   });
 
   try {
@@ -365,15 +401,10 @@ async function init() {
     });
 
     state.videos = groupVideos(normalized);
-
-    if (state.skippedRows > 0) {
-      refs.notice.textContent = `${state.skippedRows}件の不正データをスキップしました`;
-    }
-
     render();
   } catch (error) {
     refs.error.textContent = error instanceof Error ? error.message : String(error);
-    refs.serverStatus.textContent = "通信状態: 異常";
+    updateServerStatus("error");
   }
 }
 

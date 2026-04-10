@@ -35,7 +35,6 @@ body {
   padding: 0;
 }
 
-.result-meta,
 .notice,
 .error {
   font-size: 0.88rem;
@@ -224,6 +223,10 @@ body {
 .menu-buttons {
   display: flex;
   gap: 6px;
+}
+
+.search-row input {
+  flex: 1;
 }
 
 button,

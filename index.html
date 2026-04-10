@@ -9,7 +9,6 @@
   <body>
     <main class="page">
       <section class="surface talk-area" aria-label="トーク集">
-        <div id="result-meta" class="result-meta"></div>
         <div id="notice" class="notice"></div>
         <div id="error" class="error" role="alert"></div>
         <section id="results" class="results" aria-live="polite"></section>
@@ -17,19 +16,20 @@
 
       <section class="surface control-menu" aria-label="操作メニュー">
         <div class="control-row top-row">
-          <div id="server-status" class="server-status">通信状態: 未確認</div>
+          <div id="server-status" class="server-status">通信状態: 読込中</div>
           <div class="menu-buttons">
-            <button id="expand-all" type="button">展開</button>
-            <button id="collapse-all" type="button">折り畳み</button>
+            <button id="toggle-all" type="button">全て展開</button>
+            <button id="random-section" type="button">ランダムおすすめ</button>
           </div>
         </div>
-        <div class="control-row">
+        <div class="control-row search-row">
           <input
             id="search"
             type="text"
             placeholder="検索（タイトル/大見出し/小見出し、タグは #キーワード）"
             aria-label="検索"
           />
+          <button id="clear-search" type="button">クリア</button>
         </div>
       </section>
     </main>
