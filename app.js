@@ -203,6 +203,55 @@ function createAnchor(href, label) {
   return a;
 }
 
+function buildFormattedFragment(raw) {
+  const fragment = document.createDocumentFragment();
+  const tokens = String(raw || "").split(/(\*\*|--)/);
+  let isBold = false;
+  let isStrike = false;
+
+  tokens.forEach((token) => {
+    if (token === "**") {
+      isBold = !isBold;
+      return;
+    }
+    if (token === "--") {
+      isStrike = !isStrike;
+      return;
+    }
+    if (!token) return;
+
+    let node = document.createTextNode(token);
+    if (isBold) {
+      const strong = document.createElement("strong");
+      strong.appendChild(node);
+      node = strong;
+    }
+    if (isStrike) {
+      const s = document.createElement("s");
+      s.appendChild(node);
+      node = s;
+    }
+    fragment.appendChild(node);
+  });
+
+  return fragment;
+}
+
+function createFormattedSpan(raw) {
+  const span = document.createElement("span");
+  span.appendChild(buildFormattedFragment(raw));
+  return span;
+}
+
+function createFormattedAnchor(href, label) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.appendChild(buildFormattedFragment(label));
+  return a;
+}
+
 function updateToggleAllButton() {
   const total = state.viewMode === "video" ? state.videos.length : state.talks.length;
   const openCount = state.viewMode === "video" ? state.openVideoKeys.size : state.openTalkKeys.size;
@@ -302,23 +351,17 @@ function renderCards(videos) {
       }
 
       const label = sec.sectionUrl && isValidHttpUrl(sec.sectionUrl)
-        ? createAnchor(sec.sectionUrl, sec.name)
-        : document.createTextNode(sec.name);
-
-      if (label instanceof Node && label.nodeType === Node.TEXT_NODE) {
-        const span = document.createElement("span");
-        span.textContent = label.textContent || "";
-        head.append(toggle, span);
-      } else {
-        label.classList.add("section-link");
-        head.append(toggle, label);
-      }
+        ? createFormattedAnchor(sec.sectionUrl, sec.name)
+        : createFormattedSpan(sec.name);
+      label.classList.add("section-link");
+      head.append(toggle, label);
 
       const subList = document.createElement("ul");
       subList.className = "sub-list";
       sec.subsections.forEach((sub) => {
         const li = document.createElement("li");
-        li.textContent = `- ${sub.name}`;
+        li.appendChild(document.createTextNode("- "));
+        li.appendChild(buildFormattedFragment(sub.name));
         subList.appendChild(li);
       });
 
@@ -388,9 +431,9 @@ function renderTalkCards(talks) {
     const titleRow = document.createElement("div");
     titleRow.className = "card-title-row";
     if (talk.sectionUrl && isValidHttpUrl(talk.sectionUrl)) {
-      titleRow.appendChild(createAnchor(talk.sectionUrl, talk.name));
+      titleRow.appendChild(createFormattedAnchor(talk.sectionUrl, talk.name));
     } else {
-      titleRow.textContent = talk.name;
+      titleRow.appendChild(createFormattedSpan(talk.name));
     }
 
     const metaRow = document.createElement("div");
@@ -407,7 +450,8 @@ function renderTalkCards(talks) {
     subList.className = "sub-list is-open";
     talk.subsections.forEach((sub) => {
       const li = document.createElement("li");
-      li.textContent = `- ${sub}`;
+      li.appendChild(document.createTextNode("- "));
+      li.appendChild(buildFormattedFragment(sub));
       subList.appendChild(li);
     });
     detail.appendChild(subList);
