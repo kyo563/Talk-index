@@ -455,7 +455,11 @@ async function loadData() {
   if (!rows) {
     const checked = DATA_URL_CANDIDATES.join(", ");
     const details = errors.join(" / ");
-    setError(`データ取得に失敗しました。確認URL: ${checked}。詳細: ${details}`);
+    const isFileProtocol = window.location.protocol === "file:";
+    const hint = isFileProtocol
+      ? "ヒント: file:// 直開きでは fetch 制限が出ることがあります。`python -m http.server 8000` で起動し、`http://localhost:8000` から開いてください。"
+      : "ヒント: JSONのURLをブラウザで直接開けても、fetch では CORS 設定が必要です。配信側で Access-Control-Allow-Origin を確認してください。";
+    setError(`データ取得に失敗しました。確認URL: ${checked}。詳細: ${details}。${hint}`);
     refs.resultMeta.textContent = "";
     return;
   }
