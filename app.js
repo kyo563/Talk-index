@@ -461,23 +461,29 @@ function renderTalkCards(talks) {
 
     const subList = document.createElement("ul");
     subList.className = "sub-list is-open";
+    let previousVideoKey = "";
     talk.subsections.forEach((sub) => {
       const li = document.createElement("li");
+      const videoKey = `${text(sub.videoUrl)}::${text(sub.videoTitle)}`;
 
-      const videoTitle = document.createElement("div");
-      videoTitle.className = "talk-video-title";
-      videoTitle.appendChild(document.createTextNode("動画: "));
-      if (isValidHttpUrl(sub.videoUrl)) {
-        videoTitle.appendChild(createAnchor(sub.videoUrl, sub.videoTitle));
-      } else {
-        videoTitle.appendChild(document.createTextNode(sub.videoTitle));
+      if (videoKey !== previousVideoKey) {
+        const videoTitle = document.createElement("div");
+        videoTitle.className = "talk-video-title";
+        videoTitle.appendChild(document.createTextNode("元動画: "));
+        if (isValidHttpUrl(sub.videoUrl)) {
+          videoTitle.appendChild(createAnchor(sub.videoUrl, sub.videoTitle));
+        } else {
+          videoTitle.appendChild(document.createTextNode(sub.videoTitle));
+        }
+        li.appendChild(videoTitle);
+        previousVideoKey = videoKey;
       }
 
       const subsectionText = document.createElement("div");
       subsectionText.appendChild(document.createTextNode("- "));
       subsectionText.appendChild(buildFormattedFragment(sub.name));
 
-      li.append(videoTitle, subsectionText);
+      li.appendChild(subsectionText);
       subList.appendChild(li);
     });
     detail.appendChild(subList);
