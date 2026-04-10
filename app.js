@@ -472,7 +472,7 @@ function updateScrollGradient() {
   const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
   const maxScroll = Math.max(document.documentElement.scrollHeight - window.innerHeight, 1);
   const ratio = Math.min(scrollTop / maxScroll, 1);
-  const color = lerpColorHex("#e8f4ff", "#045a8d", ratio);
+  const color = lerpColorHex("#87ceeb", "#045a8d", ratio);
   document.documentElement.style.setProperty("--scroll-marine", color);
 }
 
@@ -711,11 +711,6 @@ function renderCards(videos) {
     }
 
     detail.append(sectionList, tags);
-    if (state.recommendation) {
-      const recommendations = scoreRecommendations(state.recommendation.video, video.key);
-      detail.appendChild(createRecommendationBlock(recommendations, "video"));
-    }
-
     summary.addEventListener("click", () => {
       if (state.openVideoKeys.has(video.key)) {
         state.openVideoKeys.delete(video.key);
