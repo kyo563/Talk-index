@@ -14,9 +14,13 @@ const state = {
   viewMode: "video",
   randomSection: "",
   randomTalkKeys: null,
+  newVideoHighlightKeys: new Set(),
+  isNewVideoHighlightVisible: true,
 };
 
 const RECOMMEND_LIMIT = 3;
+const NEW_VIDEO_HIGHLIGHT_COUNT = 1;
+const NEW_VIDEO_HIGHLIGHT_SCROLL_SCREENS = 2;
 const TOKEN_STOP_WORDS = new Set([
   "の",
   "こと",
@@ -606,6 +610,21 @@ function openCardFromRecommendation(mode, key) {
   });
 }
 
+function updateNewVideoHighlightVisibility() {
+  const threshold = window.innerHeight * NEW_VIDEO_HIGHLIGHT_SCROLL_SCREENS;
+  state.isNewVideoHighlightVisible = window.scrollY <= threshold;
+}
+
+function pickNewVideoHighlightKeys(videos) {
+  const latestVideo = videos
+    .map((video) => ({ ...video, parsedDate: parseDateValue(video.date) }))
+    .filter((video) => video.parsedDate)
+    .sort((a, b) => b.parsedDate.localeCompare(a.parsedDate))[0];
+
+  if (!latestVideo) return new Set();
+  return new Set([latestVideo.key].slice(0, NEW_VIDEO_HIGHLIGHT_COUNT));
+}
+
 function renderCards(videos) {
   if (!videos.length) return renderNoResult();
 
@@ -617,6 +636,7 @@ function renderCards(videos) {
     card.dataset.key = video.key;
     card.dataset.tone = pickAmbientTone([video.title, ...video.tags, ...video.sections.map((sec) => sec.name)]);
     if (state.openVideoKeys.has(video.key)) card.classList.add("is-open");
+    if (state.isNewVideoHighlightVisible && state.newVideoHighlightKeys.has(video.key)) card.classList.add("is-new-highlight");
 
     const summary = document.createElement("div");
     summary.className = "card-summary";
@@ -943,6 +963,24 @@ function bindAmbientReactions() {
   });
 }
 
+function bindMobileScrollLock() {
+  const viewport = document.querySelector('meta[name="viewport"]');
+  if (viewport) {
+    viewport.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover");
+  }
+
+  const preventIfZoom = (event) => {
+    if (event.ctrlKey) event.preventDefault();
+  };
+  const preventPinch = (event) => {
+    if (event.touches && event.touches.length > 1) event.preventDefault();
+  };
+
+  document.addEventListener("touchmove", preventPinch, { passive: false });
+  window.addEventListener("wheel", preventIfZoom, { passive: false });
+  window.addEventListener("gesturestart", (event) => event.preventDefault(), { passive: false });
+}
+
 async function init() {
   refs.search.addEventListener("input", (event) => {
     state.search = text(event.target.value);
@@ -979,9 +1017,18 @@ async function init() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
 
-  window.addEventListener("scroll", updateScrollGradient, { passive: true });
+  window.addEventListener("scroll", () => {
+    updateScrollGradient();
+    const before = state.isNewVideoHighlightVisible;
+    updateNewVideoHighlightVisibility();
+    if (before !== state.isNewVideoHighlightVisible && state.viewMode === "video") {
+      render();
+    }
+  }, { passive: true });
   updateScrollGradient();
+  updateNewVideoHighlightVisibility();
   bindAmbientReactions();
+  bindMobileScrollLock();
 
   try {
     const rows = await fetchRows();
@@ -997,6 +1044,7 @@ async function init() {
     });
 
     state.videos = groupVideos(normalized);
+    state.newVideoHighlightKeys = pickNewVideoHighlightKeys(state.videos);
     state.talks = groupTalks(normalized);
     state.recommendation = buildRecommendationStore(state.videos, state.talks);
     render();
