@@ -205,7 +205,7 @@ def extract_timestamp_comment(youtube, video_id: str) -> str:
 
     best_text = ""
     best_score = (-1, -1, -1)  # timestamp_count, like_count, text_length
-    for row in _collect_timestamp_comment_rows(response):
+    for row in _collect_timestamp_comment_rows(youtube, response):
         score = (
             int(row["timestamp_count"]),
             int(row["like_count"]),
@@ -241,7 +241,7 @@ def list_timestamp_comments(
     except HttpError as exc:
         raise YouTubeServiceError(f"commentThreads.list でエラー: video_id={video_id}, detail={exc}") from exc
 
-    results = _collect_timestamp_comment_rows(response)
+    results = _collect_timestamp_comment_rows(youtube, response)
 
     results.sort(
         key=lambda row: (
@@ -254,18 +254,61 @@ def list_timestamp_comments(
     return results
 
 
-def _collect_timestamp_comment_rows(response: dict) -> list[dict[str, str | int]]:
+def _collect_timestamp_comment_rows(youtube, response: dict) -> list[dict[str, str | int]]:
     results: list[dict[str, str | int]] = []
     for item in response.get("items", []):
         top_level_snippet = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
         _append_timestamp_comment_row(results, top_level_snippet, comment_type="top")
 
-        reply_items = item.get("replies", {}).get("comments", [])
+        thread_snippet = item.get("snippet", {})
+        top_level_id = (
+            thread_snippet.get("topLevelComment", {}).get("id")
+            or item.get("id")
+            or ""
+        )
+        reply_items = _fetch_all_replies(youtube, item, top_level_id=top_level_id)
         for reply in reply_items:
             reply_snippet = reply.get("snippet", {})
             _append_timestamp_comment_row(results, reply_snippet, comment_type="reply")
 
     return results
+
+
+def _fetch_all_replies(youtube, thread_item: dict, top_level_id: str) -> list[dict]:
+    embedded_replies = thread_item.get("replies", {}).get("comments", [])
+    total_reply_count = int(thread_item.get("snippet", {}).get("totalReplyCount", 0) or 0)
+    if total_reply_count <= len(embedded_replies):
+        return embedded_replies
+
+    if not top_level_id:
+        return embedded_replies
+
+    replies: list[dict] = []
+    page_token = None
+    while True:
+        try:
+            response = (
+                youtube.comments()
+                .list(
+                    part="snippet",
+                    parentId=top_level_id,
+                    textFormat="plainText",
+                    maxResults=100,
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise YouTubeServiceError(
+                f"comments.list で返信取得に失敗: parent_id={top_level_id}, detail={exc}"
+            ) from exc
+
+        replies.extend(response.get("items", []))
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    return replies or embedded_replies
 
 
 def _append_timestamp_comment_row(
