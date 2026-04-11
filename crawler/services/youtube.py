@@ -192,7 +192,7 @@ def extract_timestamp_comment(youtube, video_id: str) -> str:
         response = (
             youtube.commentThreads()
             .list(
-                part="snippet",
+                part="snippet,replies",
                 videoId=video_id,
                 order="relevance",
                 textFormat="plainText",
@@ -205,23 +205,15 @@ def extract_timestamp_comment(youtube, video_id: str) -> str:
 
     best_text = ""
     best_score = (-1, -1, -1)  # timestamp_count, like_count, text_length
-    for item in response.get("items", []):
-        snippet = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
-        text = (snippet.get("textOriginal", "") or "").strip()
-        if not text:
-            continue
-
-        timestamps = TIMESTAMP_PATTERN.findall(text)
-        if not timestamps:
-            continue
-
-        unique_timestamps = len(set(timestamps))
-        like_count = int(snippet.get("likeCount", 0) or 0)
-        text_length = len(text)
-        score = (unique_timestamps, like_count, text_length)
+    for row in _collect_timestamp_comment_rows(response):
+        score = (
+            int(row["timestamp_count"]),
+            int(row["like_count"]),
+            len(str(row["text"])),
+        )
         if score > best_score:
             best_score = score
-            best_text = text
+            best_text = str(row["text"])
 
     return best_text
 
@@ -238,7 +230,7 @@ def list_timestamp_comments(
         response = (
             youtube.commentThreads()
             .list(
-                part="snippet",
+                part="snippet,replies",
                 videoId=video_id,
                 order="relevance",
                 textFormat="plainText",
@@ -249,24 +241,7 @@ def list_timestamp_comments(
     except HttpError as exc:
         raise YouTubeServiceError(f"commentThreads.list でエラー: video_id={video_id}, detail={exc}") from exc
 
-    results: list[dict[str, str | int]] = []
-    for item in response.get("items", []):
-        snippet = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
-        text = (snippet.get("textOriginal", "") or "").strip()
-        if not text:
-            continue
-
-        timestamps = TIMESTAMP_PATTERN.findall(text)
-        if not timestamps:
-            continue
-
-        results.append(
-            {
-                "text": text,
-                "timestamp_count": len(set(timestamps)),
-                "like_count": int(snippet.get("likeCount", 0) or 0),
-            }
-        )
+    results = _collect_timestamp_comment_rows(response)
 
     results.sort(
         key=lambda row: (
@@ -277,6 +252,41 @@ def list_timestamp_comments(
         reverse=True,
     )
     return results
+
+
+def _collect_timestamp_comment_rows(response: dict) -> list[dict[str, str | int]]:
+    results: list[dict[str, str | int]] = []
+    for item in response.get("items", []):
+        top_level_snippet = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+        _append_timestamp_comment_row(results, top_level_snippet)
+
+        reply_items = item.get("replies", {}).get("comments", [])
+        for reply in reply_items:
+            reply_snippet = reply.get("snippet", {})
+            _append_timestamp_comment_row(results, reply_snippet)
+
+    return results
+
+
+def _append_timestamp_comment_row(
+    results: list[dict[str, str | int]],
+    snippet: dict,
+) -> None:
+    text = (snippet.get("textOriginal", "") or "").strip()
+    if not text:
+        return
+
+    timestamps = TIMESTAMP_PATTERN.findall(text)
+    if not timestamps:
+        return
+
+    results.append(
+        {
+            "text": text,
+            "timestamp_count": len(set(timestamps)),
+            "like_count": int(snippet.get("likeCount", 0) or 0),
+        }
+    )
 
 
 def fetch_video_item(youtube, video_id: str) -> VideoItem:
