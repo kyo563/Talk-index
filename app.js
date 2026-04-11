@@ -1093,19 +1093,7 @@ function renderTalkCards(talks) {
 
     main.append(titleRow, metaRow);
 
-    const side = document.createElement("div");
-    side.className = "card-side";
-
-    const thumb = document.createElement("img");
-    thumb.className = "thumbnail";
-    thumb.alt = "サムネイル";
-    thumb.loading = "lazy";
-    if (talk.thumb) {
-      thumb.src = talk.thumb;
-    }
-
-    side.appendChild(thumb);
-    summary.append(main, side);
+    summary.append(main);
 
     const detail = document.createElement("div");
     detail.className = "card-detail";
