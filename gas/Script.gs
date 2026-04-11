@@ -4,8 +4,16 @@
  *
  * 使い方:
  * 1) Google Apps Script に貼り付け
- * 2) removeDuplicateRowsByColumnsAtoH() を実行
+ * 2) スプレッドシートを開く（または再読み込み）
+ * 3) 上部メニュー「重複を削除」から実行
  */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('重複を削除')
+    .addItem('重複を削除', 'removeDuplicateRowsByColumnsAtoH')
+    .addToUi();
+}
+
 function removeDuplicateRowsByColumnsAtoH() {
   var sheetName = '索引';
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
