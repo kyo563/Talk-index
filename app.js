@@ -1300,6 +1300,31 @@ async function ensureVideoDetailsLoaded(video) {
   }
 }
 
+async function loadTalksFromLegacyLatest() {
+  let lastError = "";
+  for (const url of DATA_URL_CANDIDATES) {
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : data?.rows);
+      if (!Array.isArray(rows)) continue;
+
+      const normalized = [];
+      rows.forEach((raw) => {
+        const row = normalizeRow(raw || {});
+        if (!row.title || !row.section) return;
+        normalized.push(row);
+      });
+      if (!normalized.length) continue;
+      return groupTalks(normalized);
+    } catch (error) {
+      lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  throw new Error(lastError || "latest.json からのフォールバック読込に失敗しました");
+}
+
 async function loadTalksIfNeeded() {
   if (state.talksStatus === "ready") return state.talks;
   if (state.talksPromise) return state.talksPromise;
@@ -1325,6 +1350,20 @@ async function loadTalksIfNeeded() {
         lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
       }
     }
+    try {
+      const fallbackTalks = await loadTalksFromLegacyLatest();
+      if (Array.isArray(fallbackTalks) && fallbackTalks.length) {
+        state.talks = fallbackTalks;
+        state.talksStatus = "ready";
+        state.talksError = "";
+        refs.notice.textContent = "talks.json が無いため latest.json 形式から代替表示中です";
+        return state.talks;
+      }
+    } catch (fallbackError) {
+      const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      lastError = `${lastError} / fallback: ${fallbackMessage}`;
+    }
+
     state.talksStatus = "error";
     state.talksError = lastError || "talks.json の読込に失敗しました";
     return [];
