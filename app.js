@@ -29,6 +29,7 @@ const RECOMMEND_LIMIT = 3;
 const NEW_VIDEO_HIGHLIGHT_COUNT = 1;
 const NEW_VIDEO_HIGHLIGHT_SCROLL_SCREENS = 2;
 const SONG_DB_URL = "https://performancerecord.github.io/uni-uta-db/";
+const GENERIC_TAG_RATIO_THRESHOLD = 0.6;
 
 const TOKEN_STOP_WORDS = new Set([
   "の",
@@ -199,6 +200,35 @@ function groupVideos(rows) {
     sections: Array.from(video.sections.values()),
     tags: Array.from(video.tags),
     thumb: thumbnailUrl(video.url),
+  }));
+}
+
+function buildGenericTagSet(videos) {
+  const total = videos.length;
+  if (!total) return new Set();
+
+  const counts = new Map();
+  videos.forEach((video) => {
+    const uniqueTags = new Set(video.tags.map((tag) => normalizeTag(tag)).filter(Boolean));
+    uniqueTags.forEach((tag) => {
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    });
+  });
+
+  const generic = new Set();
+  counts.forEach((count, tag) => {
+    if (count / total > GENERIC_TAG_RATIO_THRESHOLD) {
+      generic.add(tag);
+    }
+  });
+  return generic;
+}
+
+function attachDisplayTags(videos) {
+  const genericTags = buildGenericTagSet(videos);
+  return videos.map((video) => ({
+    ...video,
+    displayTags: video.tags.filter((tag) => !genericTags.has(normalizeTag(tag))),
   }));
 }
 
@@ -569,7 +599,7 @@ function renderNoResult() {
   fallback.href = SONG_DB_URL;
   fallback.target = "_blank";
   fallback.rel = "noopener noreferrer";
-  fallback.textContent = "こっちもあるよ";
+  fallback.textContent = "歌枠DBも見る";
 
   refs.results.append(message, fallback);
 }
@@ -760,8 +790,9 @@ function renderCards(videos) {
 
     const tags = document.createElement("div");
     tags.className = "tags";
-    if (video.tags.length) {
-      video.tags.forEach((tag) => {
+    const tagsForDisplay = Array.isArray(video.displayTags) ? video.displayTags : video.tags;
+    if (tagsForDisplay.length) {
+      tagsForDisplay.forEach((tag) => {
         const el = document.createElement("span");
         el.className = "tag";
         el.textContent = `#${tag}`;
@@ -1079,7 +1110,7 @@ async function init() {
       normalized.push(row);
     });
 
-    state.videos = groupVideos(normalized);
+    state.videos = attachDisplayTags(groupVideos(normalized));
     state.newVideoHighlightKeys = pickNewVideoHighlightKeys(state.videos);
     state.talks = groupTalks(normalized);
     render();

@@ -38,7 +38,36 @@ body[data-ambient-tone="calm"] {
   --ambient-wave-scale: 1;
 }
 
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::before {
+  background:
+    radial-gradient(circle at 15% 92%, rgba(255, 255, 255, 0.2) 0 10px, transparent 11px),
+    radial-gradient(circle at 38% 88%, rgba(255, 255, 255, 0.16) 0 8px, transparent 9px),
+    radial-gradient(circle at 72% 95%, rgba(255, 255, 255, 0.2) 0 11px, transparent 12px);
+  animation: ambient-float 30s linear infinite;
+}
+
+body::after {
+  background:
+    radial-gradient(circle at 20% 24%, rgba(255, 255, 255, 0.28) 0 1.2px, transparent 2px),
+    radial-gradient(circle at 61% 18%, rgba(255, 255, 255, 0.24) 0 1.1px, transparent 2px),
+    radial-gradient(circle at 82% 34%, rgba(255, 255, 255, 0.2) 0 1px, transparent 2px);
+  opacity: 0.8;
+  animation: ambient-twinkle 14s ease-in-out infinite alternate;
+}
+
 .page {
+  position: relative;
+  z-index: 1;
   max-width: 980px;
   margin: 0 auto;
   min-height: 100vh;
@@ -82,7 +111,7 @@ body[data-ambient-tone="calm"] {
   min-height: 60vh;
   background: transparent;
   border: none;
-  padding: 0;
+  padding: 52px 0 0;
 }
 
 .notice,
@@ -96,13 +125,15 @@ body[data-ambient-tone="calm"] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 20;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(956px, calc(100% - 24px));
+  z-index: 30;
   background: #fff;
   padding: 6px 0;
   border-bottom: 1px solid #e2e8f0;
-  margin-bottom: 8px;
 }
 
 .view-tabs {
@@ -402,6 +433,24 @@ body[data-ambient-tone="calm"] .card:focus-within {
 }
 
 
+@keyframes ambient-float {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-18px);
+  }
+}
+
+@keyframes ambient-twinkle {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 0.8;
+  }
+}
+
 @keyframes recommend-rise {
   from {
     opacity: 0;
@@ -419,7 +468,9 @@ body[data-ambient-tone="calm"] .card:focus-within {
    ここを上げると主張が強くなるため、opacity と duration の変更は小さく保つ。 */
 @media (prefers-reduced-motion: reduce) {
   .ambient-wave,
-  .recommend-item {
+  .recommend-item,
+  body::before,
+  body::after {
     animation: none;
   }
 }
@@ -519,6 +570,17 @@ button {
 input {
   width: 100%;
   padding: 10px;
+}
+
+@media (max-width: 699px) {
+  .talk-area {
+    padding-top: 56px;
+  }
+
+  .view-tab {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+  }
 }
 
 @media (min-width: 700px) {
