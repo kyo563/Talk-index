@@ -22,9 +22,6 @@ body {
   --ambient-wave-opacity: 0.1;
   --ambient-wave-scale: 1;
   --ambient-cosmos-progress: 0;
-  --bubble-duration: 14s;
-  --bubble-drift-start: 20px;
-  --bubble-drift-distance: 120px;
 }
 
 body[data-ambient-tone="night"] {
@@ -43,38 +40,46 @@ body[data-ambient-tone="calm"] {
 }
 
 
-body::before,
-body::after {
-  content: "";
+.ambient-scene {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
+  overflow: hidden;
 }
 
-body::before {
-  background:
-    radial-gradient(circle at var(--bubble-x-1, 14%) var(--bubble-y-1, 92%), rgba(255, 255, 255, 0.22) 0 var(--bubble-size-1, 11px), transparent calc(var(--bubble-size-1, 11px) + 1px)),
-    radial-gradient(circle at var(--bubble-x-2, 29%) var(--bubble-y-2, 98%), rgba(255, 255, 255, 0.18) 0 var(--bubble-size-2, 8px), transparent calc(var(--bubble-size-2, 8px) + 1px)),
-    radial-gradient(circle at var(--bubble-x-3, 44%) var(--bubble-y-3, 95%), rgba(255, 255, 255, 0.16) 0 var(--bubble-size-3, 9px), transparent calc(var(--bubble-size-3, 9px) + 1px)),
-    radial-gradient(circle at var(--bubble-x-4, 58%) var(--bubble-y-4, 99%), rgba(255, 255, 255, 0.2) 0 var(--bubble-size-4, 10px), transparent calc(var(--bubble-size-4, 10px) + 1px)),
-    radial-gradient(circle at var(--bubble-x-5, 73%) var(--bubble-y-5, 96%), rgba(255, 255, 255, 0.17) 0 var(--bubble-size-5, 7px), transparent calc(var(--bubble-size-5, 7px) + 1px)),
-    radial-gradient(circle at var(--bubble-x-6, 86%) var(--bubble-y-6, 93%), rgba(255, 255, 255, 0.22) 0 var(--bubble-size-6, 10px), transparent calc(var(--bubble-size-6, 10px) + 1px));
-  opacity: calc(1 - var(--ambient-cosmos-progress));
-  animation: ambient-float var(--bubble-duration) linear infinite;
+.ambient-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ambient-layer--bubbles {
+  opacity: calc(1 - (var(--ambient-cosmos-progress) * 0.96));
+  transition: opacity 0.25s linear;
+}
+
+.ambient-layer--stars {
+  opacity: calc(0.04 + (var(--ambient-cosmos-progress) * 0.96));
+  transition: opacity 0.25s linear;
+}
+
+.ambient-bubble {
+  position: absolute;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.55) 0 22%, rgba(255, 255, 255, 0.2) 45%, rgba(255, 255, 255, 0.05) 100%);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.28), inset 0 0 6px rgba(255, 255, 255, 0.12);
   will-change: transform;
 }
 
-body::after {
-  background:
-    radial-gradient(circle at 12% 26%, rgba(255, 255, 255, 0.32) 0 1.3px, transparent 2px),
-    radial-gradient(circle at 28% 18%, rgba(255, 255, 255, 0.28) 0 1.1px, transparent 2px),
-    radial-gradient(circle at 42% 35%, rgba(255, 255, 255, 0.3) 0 1.2px, transparent 2px),
-    radial-gradient(circle at 59% 14%, rgba(255, 255, 255, 0.25) 0 1.1px, transparent 2px),
-    radial-gradient(circle at 74% 29%, rgba(255, 255, 255, 0.35) 0 1.4px, transparent 2px),
-    radial-gradient(circle at 88% 21%, rgba(255, 255, 255, 0.26) 0 1.1px, transparent 2px);
-  opacity: calc(0.08 + (var(--ambient-cosmos-progress) * 0.92));
-  animation: ambient-twinkle 12s ease-in-out infinite alternate;
+.ambient-star {
+  position: absolute;
+  border-radius: 999px;
+  background: #f8fafc;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.75), 0 0 14px rgba(125, 211, 252, 0.26);
+  opacity: 0.66;
+  animation: star-twinkle var(--twinkle-duration, 6s) ease-in-out infinite;
+  animation-delay: var(--twinkle-delay, 0s);
 }
 
 .page {
@@ -445,21 +450,15 @@ body[data-ambient-tone="calm"] .card:focus-within {
 }
 
 
-@keyframes ambient-float {
+@keyframes star-twinkle {
   from {
-    transform: translateY(var(--bubble-drift-start));
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
   }
   to {
-    transform: translateY(calc(-1 * var(--bubble-drift-distance)));
-  }
-}
-
-@keyframes ambient-twinkle {
-  from {
     opacity: 0.45;
-  }
-  to {
-    opacity: 0.8;
   }
 }
 
@@ -481,8 +480,7 @@ body[data-ambient-tone="calm"] .card:focus-within {
 @media (prefers-reduced-motion: reduce) {
   .ambient-wave,
   .recommend-item,
-  body::before,
-  body::after {
+  .ambient-star {
     animation: none;
   }
 }

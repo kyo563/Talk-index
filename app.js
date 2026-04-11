@@ -64,6 +64,22 @@ const refs = {
   tabVideo: document.getElementById("tab-video"),
   tabTalk: document.getElementById("tab-talk"),
   topButton: document.getElementById("top-button"),
+  bubbleLayer: document.getElementById("bubble-layer"),
+  starLayer: document.getElementById("star-layer"),
+};
+
+const AMBIENT_TRANSITION_START = 0.45;
+const AMBIENT_TRANSITION_END = 0.8;
+const AMBIENT_BUBBLE_COUNT = window.innerWidth < 700 ? 16 : 24;
+const AMBIENT_STAR_COUNT = window.innerWidth < 700 ? 32 : 48;
+const ambientScene = {
+  bubbles: [],
+  stars: [],
+  width: window.innerWidth,
+  height: window.innerHeight,
+  lastTick: 0,
+  rafId: 0,
+  reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
 };
 
 function text(value) {
@@ -544,8 +560,105 @@ function updateScrollGradient() {
   const ratio = Math.min(scrollTop / maxScroll, 1);
   const color = lerpColorHex("#87ceeb", "#045a8d", ratio);
   document.documentElement.style.setProperty("--scroll-marine", color);
-  const starProgress = Math.min(Math.max((ratio - 0.7) / 0.3, 0), 1);
+  const starProgress = Math.min(
+    Math.max((ratio - AMBIENT_TRANSITION_START) / (AMBIENT_TRANSITION_END - AMBIENT_TRANSITION_START), 0),
+    1,
+  );
   document.documentElement.style.setProperty("--ambient-cosmos-progress", starProgress.toFixed(3));
+}
+
+function randomBetween(min, max) {
+  return min + (max - min) * Math.random();
+}
+
+function resetBubble(bubble, randomY = false) {
+  const width = ambientScene.width;
+  const height = ambientScene.height;
+  bubble.x = randomBetween(-20, width + 20);
+  bubble.y = randomY ? randomBetween(-height, height + 40) : height + randomBetween(20, 180);
+  bubble.baseX = bubble.x;
+  bubble.wobbleOffset = randomBetween(0, Math.PI * 2);
+}
+
+function createAmbientBubble() {
+  const node = document.createElement("span");
+  node.className = "ambient-bubble";
+  const size = randomBetween(6, 16);
+  node.style.width = `${size}px`;
+  node.style.height = `${size}px`;
+  refs.bubbleLayer.appendChild(node);
+
+  const bubble = {
+    node,
+    size,
+    x: 0,
+    y: 0,
+    baseX: 0,
+    speed: randomBetween(18, 48),
+    wobbleAmp: randomBetween(4, 16),
+    wobbleSpeed: randomBetween(0.7, 1.8),
+    wobbleOffset: randomBetween(0, Math.PI * 2),
+  };
+  resetBubble(bubble, true);
+  return bubble;
+}
+
+function createAmbientStar() {
+  const node = document.createElement("span");
+  node.className = "ambient-star";
+  const size = randomBetween(1.3, 2.8);
+  node.style.width = `${size}px`;
+  node.style.height = `${size}px`;
+  node.style.left = `${randomBetween(0, 100)}%`;
+  node.style.top = `${randomBetween(3, 97)}%`;
+  node.style.setProperty("--twinkle-duration", `${randomBetween(4.5, 9)}s`);
+  node.style.setProperty("--twinkle-delay", `${randomBetween(-8, 0)}s`);
+  refs.starLayer.appendChild(node);
+  return node;
+}
+
+function updateAmbientBubbles(deltaSec, elapsedSec) {
+  if (!ambientScene.bubbles.length) return;
+  ambientScene.bubbles.forEach((bubble) => {
+    bubble.y -= bubble.speed * deltaSec;
+    if (bubble.y < -bubble.size - 16) {
+      resetBubble(bubble, false);
+    }
+    const sway = Math.sin((elapsedSec * bubble.wobbleSpeed) + bubble.wobbleOffset) * bubble.wobbleAmp;
+    bubble.x = bubble.baseX + sway;
+    bubble.node.style.transform = `translate3d(${bubble.x}px, ${bubble.y}px, 0)`;
+  });
+}
+
+function animateAmbientScene(timestamp) {
+  if (ambientScene.reducedMotion) return;
+  if (!ambientScene.lastTick) ambientScene.lastTick = timestamp;
+  const deltaSec = Math.min((timestamp - ambientScene.lastTick) / 1000, 0.05);
+  ambientScene.lastTick = timestamp;
+  updateAmbientBubbles(deltaSec, timestamp / 1000);
+  ambientScene.rafId = window.requestAnimationFrame(animateAmbientScene);
+}
+
+function refreshAmbientViewport() {
+  ambientScene.width = window.innerWidth;
+  ambientScene.height = window.innerHeight;
+}
+
+function initAmbientScene() {
+  if (!refs.bubbleLayer || !refs.starLayer) return;
+  refs.bubbleLayer.innerHTML = "";
+  refs.starLayer.innerHTML = "";
+
+  ambientScene.bubbles = Array.from({ length: AMBIENT_BUBBLE_COUNT }, () => createAmbientBubble());
+  ambientScene.stars = Array.from({ length: AMBIENT_STAR_COUNT }, () => createAmbientStar());
+
+  if (ambientScene.reducedMotion) {
+    ambientScene.bubbles.forEach((bubble) => {
+      bubble.node.style.transform = `translate3d(${bubble.x}px, ${bubble.y}px, 0)`;
+    });
+    return;
+  }
+  ambientScene.rafId = window.requestAnimationFrame(animateAmbientScene);
 }
 
 function createFormattedSpan(raw) {
@@ -1040,6 +1153,9 @@ function bindMobileScrollLock() {
 }
 
 async function init() {
+  refreshAmbientViewport();
+  initAmbientScene();
+
   refs.search.addEventListener("focus", () => {
     if (state.searchIndexStatus === "idle") {
       void loadSearchIndexIfNeeded();
@@ -1088,6 +1204,10 @@ async function init() {
     if (before !== state.isNewVideoHighlightVisible && state.viewMode === "video") {
       render();
     }
+  }, { passive: true });
+
+  window.addEventListener("resize", () => {
+    refreshAmbientViewport();
   }, { passive: true });
   updateScrollGradient();
   updateNewVideoHighlightVisibility();
