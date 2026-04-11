@@ -55,12 +55,12 @@ body[data-ambient-tone="calm"] {
 }
 
 .ambient-layer--bubbles {
-  opacity: calc(1 - (var(--ambient-cosmos-progress) * 0.96));
+  opacity: calc(1 - var(--ambient-cosmos-progress));
   transition: opacity 0.25s linear;
 }
 
 .ambient-layer--stars {
-  opacity: calc(0.04 + (var(--ambient-cosmos-progress) * 0.96));
+  opacity: var(--ambient-cosmos-progress);
   transition: opacity 0.25s linear;
 }
 
