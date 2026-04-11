@@ -567,7 +567,7 @@ function updateAmbientTransitionByCards() {
   if (!cards.length) return;
 
   const firstCard = cards[0];
-  const targetCard = cards[Math.min(4, cards.length - 1)];
+  const targetCard = cards[Math.min(49, cards.length - 1)];
   if (!firstCard || !targetCard) return;
 
   const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
@@ -635,9 +635,9 @@ function createAmbientBubble() {
 function createAmbientStar() {
   const node = document.createElement("span");
   node.className = "ambient-star";
-  const size = randomBetween(1.3, 2.8);
-  node.style.width = `${size}px`;
-  node.style.height = `${size}px`;
+  const size = randomBetween(10, 18);
+  node.textContent = "☆";
+  node.style.fontSize = `${size}px`;
   node.style.left = `${randomBetween(0, 100)}%`;
   node.style.top = `${randomBetween(3, 97)}%`;
   node.style.setProperty("--twinkle-duration", `${randomBetween(4.5, 9)}s`);

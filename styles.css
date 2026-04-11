@@ -74,9 +74,9 @@ body[data-ambient-tone="calm"] {
 
 .ambient-star {
   position: absolute;
-  border-radius: 999px;
-  background: #f8fafc;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.75), 0 0 14px rgba(125, 211, 252, 0.26);
+  color: #f8fafc;
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.75), 0 0 14px rgba(125, 211, 252, 0.26);
+  line-height: 1;
   opacity: 0.66;
   animation: star-twinkle var(--twinkle-duration, 6s) ease-in-out infinite;
   animation-delay: var(--twinkle-delay, 0s);
