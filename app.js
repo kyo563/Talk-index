@@ -552,6 +552,16 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function configureAmbientBubbleMotion() {
+  const isNarrow = window.innerWidth <= 640;
+  const durationSec = isNarrow ? 12 : 15;
+  const driftDistancePx = isNarrow ? 90 : 130;
+  const driftStartPx = isNarrow ? 16 : 22;
+  document.documentElement.style.setProperty("--bubble-duration", `${durationSec}s`);
+  document.documentElement.style.setProperty("--bubble-drift-distance", `${driftDistancePx}px`);
+  document.documentElement.style.setProperty("--bubble-drift-start", `${driftStartPx}px`);
+}
+
 function seedAmbientBubbles() {
   for (let i = 1; i <= 6; i += 1) {
     const x = randomInt(8, 92);
@@ -1108,7 +1118,10 @@ async function init() {
   updateNewVideoHighlightVisibility();
   bindAmbientReactions();
   bindMobileScrollLock();
+  configureAmbientBubbleMotion();
   seedAmbientBubbles();
+  window.setInterval(seedAmbientBubbles, 12000);
+  window.addEventListener("resize", configureAmbientBubbleMotion, { passive: true });
 
   try {
     const rows = await fetchRows();

@@ -22,6 +22,9 @@ body {
   --ambient-wave-opacity: 0.1;
   --ambient-wave-scale: 1;
   --ambient-cosmos-progress: 0;
+  --bubble-duration: 14s;
+  --bubble-drift-start: 20px;
+  --bubble-drift-distance: 120px;
 }
 
 body[data-ambient-tone="night"] {
@@ -58,7 +61,8 @@ body::before {
     radial-gradient(circle at var(--bubble-x-5, 73%) var(--bubble-y-5, 96%), rgba(255, 255, 255, 0.17) 0 var(--bubble-size-5, 7px), transparent calc(var(--bubble-size-5, 7px) + 1px)),
     radial-gradient(circle at var(--bubble-x-6, 86%) var(--bubble-y-6, 93%), rgba(255, 255, 255, 0.22) 0 var(--bubble-size-6, 10px), transparent calc(var(--bubble-size-6, 10px) + 1px));
   opacity: calc(1 - var(--ambient-cosmos-progress));
-  animation: ambient-float 26s linear infinite;
+  animation: ambient-float var(--bubble-duration) linear infinite;
+  will-change: transform;
 }
 
 body::after {
@@ -443,10 +447,10 @@ body[data-ambient-tone="calm"] .card:focus-within {
 
 @keyframes ambient-float {
   from {
-    transform: translateY(16px);
+    transform: translateY(var(--bubble-drift-start));
   }
   to {
-    transform: translateY(-34px);
+    transform: translateY(calc(-1 * var(--bubble-drift-distance)));
   }
 }
 
