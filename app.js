@@ -1314,7 +1314,10 @@ async function loadTalksIfNeeded() {
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const talks = Array.isArray(data?.talks) ? data.talks : (Array.isArray(data) ? data : []);
+        const talks = Array.isArray(data?.talks) ? data.talks : (Array.isArray(data) ? data : null);
+        if (!Array.isArray(talks)) {
+          throw new Error("talks.json の形式が不正です");
+        }
         state.talks = talks;
         state.talksStatus = "ready";
         state.talksError = "";
