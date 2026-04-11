@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import boto3
 
-from crawler.services.spreadsheet import build_gspread_client
+from crawler.services.spreadsheet import build_gspread_client, normalize_spreadsheet_id
 
 TOKEN_STOP_WORDS = {
     "の",
@@ -151,7 +151,7 @@ def _build_search_entries(items: list[dict[str, object]]) -> dict[str, object]:
 
 
 def main() -> None:
-    spreadsheet_id = _require_env("SPREADSHEET_ID")
+    spreadsheet_id = normalize_spreadsheet_id(_require_env("SPREADSHEET_ID"))
     worksheet_name = os.getenv("SPREADSHEET_WORKSHEET_NAME", "索引").strip() or "索引"
     service_account_json = _require_env("GOOGLE_SERVICE_ACCOUNT_JSON")
 

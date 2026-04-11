@@ -24,6 +24,7 @@ MAJOR_LINE_PATTERN = re.compile(r"^\s*(?P<ts>\d{2}:\d{2}:\d{2})\s*(?P<label>.*)$
 MINOR_LINE_PATTERN = re.compile(
     r"^\s*(?P<marker>[┝└├])\s*(?P<ts>\d{1,2}:\d{2}:\d{2})\s*(?P<label>.*)$"
 )
+SPREADSHEET_KEY_PATTERN = re.compile(r"^[a-zA-Z0-9-_]{20,}$")
 
 
 def build_gspread_client(service_account_json: str) -> gspread.Client:
@@ -60,6 +61,27 @@ def extract_video_id_from_url(url: str) -> str:
         return path_parts[1]
 
     return ""
+
+
+def normalize_spreadsheet_id(raw_value: str) -> str:
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+
+    if SPREADSHEET_KEY_PATTERN.fullmatch(value):
+        return value
+
+    parsed = urlparse(value)
+    if parsed.netloc not in {"docs.google.com", "drive.google.com"}:
+        return value
+
+    path_parts = [p for p in parsed.path.split("/") if p]
+    if len(path_parts) >= 3 and path_parts[0] == "spreadsheets" and path_parts[1] == "d":
+        spreadsheet_id = path_parts[2]
+        if SPREADSHEET_KEY_PATTERN.fullmatch(spreadsheet_id):
+            return spreadsheet_id
+
+    return value
 
 
 def _normalize_header_name(value: str) -> str:

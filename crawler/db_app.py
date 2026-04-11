@@ -16,6 +16,7 @@ from crawler.services.spreadsheet import (
     append_videos,
     extract_video_id_from_url,
     build_gspread_client,
+    normalize_spreadsheet_id,
     read_existing_video_ids,
     read_video_ids_from_sheet_rows,
 )
@@ -48,8 +49,8 @@ def _load_secret_env_value(key: str, default: str = "") -> str:
 def _load_spreadsheet_id() -> str:
     secret_value = st.secrets.get("SPREADSHEET_ID")
     if secret_value is not None:
-        return str(secret_value).strip()
-    return os.getenv("SPREADSHEET_ID", "").strip()
+        return normalize_spreadsheet_id(str(secret_value))
+    return normalize_spreadsheet_id(os.getenv("SPREADSHEET_ID", ""))
 
 
 def load_settings() -> dict[str, str]:

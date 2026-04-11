@@ -6,6 +6,7 @@ from crawler.services.spreadsheet import (
     append_title_list_rows,
     append_videos,
     build_gspread_client,
+    normalize_spreadsheet_id,
     read_existing_video_ids,
     read_video_ids_from_url_column,
 )
@@ -15,7 +16,7 @@ from crawler.services.youtube import build_youtube_client, fetch_channel_videos
 def main() -> None:
     youtube_api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
     channel_id = os.getenv("YOUTUBE_CHANNEL_ID", "").strip()
-    spreadsheet_id = os.getenv("SPREADSHEET_ID", "").strip()
+    spreadsheet_id = normalize_spreadsheet_id(os.getenv("SPREADSHEET_ID", ""))
     worksheet_name = os.getenv("SPREADSHEET_WORKSHEET_NAME", "索引").strip() or "索引"
     title_list_worksheet = os.getenv("TITLE_LIST_WORKSHEET_NAME", "タイトルリスト").strip() or "タイトルリスト"
     service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
