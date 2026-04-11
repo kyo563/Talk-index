@@ -224,3 +224,99 @@ def extract_timestamp_comment(youtube, video_id: str) -> str:
             best_text = text
 
     return best_text
+
+
+def list_timestamp_comments(
+    youtube,
+    video_id: str,
+    max_results: int = 100,
+) -> list[dict[str, str | int]]:
+    if not video_id.strip():
+        raise YouTubeServiceError("動画IDが空です。URLを確認してください。")
+
+    try:
+        response = (
+            youtube.commentThreads()
+            .list(
+                part="snippet",
+                videoId=video_id,
+                order="relevance",
+                textFormat="plainText",
+                maxResults=max_results,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        raise YouTubeServiceError(f"commentThreads.list でエラー: video_id={video_id}, detail={exc}") from exc
+
+    results: list[dict[str, str | int]] = []
+    for item in response.get("items", []):
+        snippet = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+        text = (snippet.get("textOriginal", "") or "").strip()
+        if not text:
+            continue
+
+        timestamps = TIMESTAMP_PATTERN.findall(text)
+        if not timestamps:
+            continue
+
+        results.append(
+            {
+                "text": text,
+                "timestamp_count": len(set(timestamps)),
+                "like_count": int(snippet.get("likeCount", 0) or 0),
+            }
+        )
+
+    results.sort(
+        key=lambda row: (
+            int(row["timestamp_count"]),
+            int(row["like_count"]),
+            len(str(row["text"])),
+        ),
+        reverse=True,
+    )
+    return results
+
+
+def fetch_video_item(youtube, video_id: str) -> VideoItem:
+    value = video_id.strip()
+    if not value:
+        raise YouTubeServiceError("動画IDが空です。URLを確認してください。")
+
+    try:
+        response = (
+            youtube.videos()
+            .list(
+                part="snippet,liveStreamingDetails",
+                id=value,
+                maxResults=1,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        raise YouTubeServiceError(f"videos.list でエラー: video_id={value}, detail={exc}") from exc
+
+    items = response.get("items", [])
+    if not items:
+        raise YouTubeServiceError("動画情報を取得できませんでした。URLを確認してください。")
+
+    item = items[0]
+    snippet = item.get("snippet", {})
+    thumbs = snippet.get("thumbnails", {})
+    thumb_url = (
+        thumbs.get("high", {}).get("url")
+        or thumbs.get("medium", {}).get("url")
+        or thumbs.get("default", {}).get("url")
+        or ""
+    )
+
+    return VideoItem(
+        video_id=value,
+        title=snippet.get("title", ""),
+        url=f"https://www.youtube.com/watch?v={value}",
+        published_at=snippet.get("publishedAt", ""),
+        thumbnail_url=thumb_url,
+        tags=snippet.get("tags", []),
+        timestamp_comment="",
+    )
