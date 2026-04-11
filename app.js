@@ -29,7 +29,7 @@ const RECOMMEND_LIMIT = 3;
 const NEW_VIDEO_HIGHLIGHT_COUNT = 1;
 const NEW_VIDEO_HIGHLIGHT_SCROLL_SCREENS = 2;
 const SONG_DB_URL = "https://performancerecord.github.io/uni-uta-db/";
-const GENERIC_TAG_RATIO_THRESHOLD = 0.6;
+const GENERIC_TAG_RATIO_THRESHOLD = 1;
 
 const TOKEN_STOP_WORDS = new Set([
   "の",
