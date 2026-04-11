@@ -46,11 +46,10 @@ body[data-ambient-tone="calm"] {
 }
 
 .ambient-header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  height: 20px;
-  margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
+  height: 14px;
+  margin-bottom: 4px;
   pointer-events: none;
 }
 
@@ -100,7 +99,7 @@ body[data-ambient-tone="calm"] {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: transparent;
+  background: #fff;
   padding: 6px 0;
   border-bottom: 1px solid #e2e8f0;
   margin-bottom: 8px;
@@ -414,6 +413,8 @@ body[data-ambient-tone="calm"] .card:focus-within {
   }
 }
 
+
+
 /* 演出を強くしすぎないための安全弁:
    ここを上げると主張が強くなるため、opacity と duration の変更は小さく保つ。 */
 @media (prefers-reduced-motion: reduce) {
@@ -430,6 +431,19 @@ body[data-ambient-tone="calm"] .card:focus-within {
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 0.78rem;
+}
+
+.no-results-fallback {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: #64748b;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.no-results-fallback:hover {
+  color: #475569;
 }
 
 .control-menu {
