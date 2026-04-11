@@ -625,7 +625,8 @@ function updateAmbientTransitionByCards() {
   if (!cards.length) return;
 
   const firstCard = cards[0];
-  const targetCard = cards[Math.min(49, cards.length - 1)];
+  const halfIndex = Math.floor((cards.length - 1) * 0.5);
+  const targetCard = cards[Math.min(halfIndex, cards.length - 1)];
   if (!firstCard || !targetCard) return;
 
   const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
