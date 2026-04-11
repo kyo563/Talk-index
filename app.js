@@ -556,7 +556,7 @@ function seedAmbientBubbles() {
   for (let i = 1; i <= 6; i += 1) {
     const x = randomInt(8, 92);
     const y = randomInt(90, 104);
-    const size = randomInt(6, 13);
+    const size = randomInt(8, 15);
     document.documentElement.style.setProperty(`--bubble-x-${i}`, `${x}%`);
     document.documentElement.style.setProperty(`--bubble-y-${i}`, `${y}%`);
     document.documentElement.style.setProperty(`--bubble-size-${i}`, `${size}px`);
