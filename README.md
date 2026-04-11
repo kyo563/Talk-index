@@ -142,6 +142,7 @@ streamlit run crawler/db_app.py
 - ページタイトル: `talk-indexDB`
 - 「読み込み実行」を押すたびに 1件（または指定件数）を取り込み
 - 記帳先は `st.secrets` の `SPREADSHEET_ID` を使用（GitHub Actions と同じIDを指定）
+- `SPREADSHEET_ID` は「スプレッドシートID」またはスプレッドシートURLのどちらでも指定可能（内部でIDへ正規化）
 - 実行ごとに成否（成功/失敗）を画面に表示
 
 ## GitHub Actions で毎日9時に自動実行（JST）
@@ -160,6 +161,9 @@ YouTube動画情報を Google スプレッドシートへ追記します。
 - `SPREADSHEET_ID`
 - `GOOGLE_SERVICE_ACCOUNT_JSON`
 - `DAILY_MAX_RESULTS`（運用中は `1` 推奨）
+
+補足:
+- `SPREADSHEET_ID` はスプレッドシートID（推奨）か、`https://docs.google.com/spreadsheets/d/...` 形式URLを指定できます。
 
 任意:
 - `TITLE_LIST_WORKSHEET_NAME`（未指定時: `タイトルリスト`）
@@ -309,6 +313,9 @@ Workers Builds / Preview の設定は、次に合わせてください。
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET_NAME`
+
+補足:
+- `SPREADSHEET_ID` はスプレッドシートID（推奨）か、`https://docs.google.com/spreadsheets/d/...` 形式URLを指定できます。
 
 任意:
 - `SPREADSHEET_WORKSHEET_NAME`（未指定時: `索引`）
