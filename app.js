@@ -1168,7 +1168,7 @@ function render() {
     return;
   }
   if (!isVideo && state.talksStatus === "error") {
-    refs.notice.textContent = "";
+    refs.notice.textContent = state.talksError || "talks.json の読込に失敗しました";
     refs.results.innerHTML = "<p>トークデータの読込に失敗しました</p>";
     updateTabs();
     updateServerStatus("ok", 0);
@@ -1314,10 +1314,9 @@ async function loadTalksIfNeeded() {
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const talks = Array.isArray(data?.talks) ? data.talks : (Array.isArray(data) ? data : null);
-        if (!Array.isArray(talks)) {
-          throw new Error("talks.json の形式が不正です");
-        }
+        const talks = Array.isArray(data?.talks)
+          ? data.talks
+          : (Array.isArray(data) ? data : (() => { throw new Error("talks.json の形式が不正です"); })());
         state.talks = talks;
         state.talksStatus = "ready";
         state.talksError = "";
