@@ -68,8 +68,6 @@ const refs = {
   starLayer: document.getElementById("star-layer"),
 };
 
-const AMBIENT_TRANSITION_START = 0.45;
-const AMBIENT_TRANSITION_END = 0.8;
 const AMBIENT_BUBBLE_COUNT = window.innerWidth < 700 ? 16 : 24;
 const AMBIENT_STAR_COUNT = window.innerWidth < 700 ? 32 : 48;
 const ambientScene = {
@@ -560,11 +558,42 @@ function updateScrollGradient() {
   const ratio = Math.min(scrollTop / maxScroll, 1);
   const color = lerpColorHex("#87ceeb", "#045a8d", ratio);
   document.documentElement.style.setProperty("--scroll-marine", color);
-  const starProgress = Math.min(
-    Math.max((ratio - AMBIENT_TRANSITION_START) / (AMBIENT_TRANSITION_END - AMBIENT_TRANSITION_START), 0),
-    1,
-  );
-  document.documentElement.style.setProperty("--ambient-cosmos-progress", starProgress.toFixed(3));
+}
+
+function updateAmbientTransitionByCards() {
+  if (!refs.bubbleLayer || !refs.starLayer) return;
+
+  const cards = refs.results?.querySelectorAll?.(".card") || [];
+  if (!cards.length) return;
+
+  const firstCard = cards[0];
+  const targetCard = cards[Math.min(4, cards.length - 1)];
+  if (!firstCard || !targetCard) return;
+
+  const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+  const firstCardY = firstCard.getBoundingClientRect().top + scrollY;
+  const targetCardY = targetCard.getBoundingClientRect().top + scrollY;
+
+  const startY = firstCardY - (window.innerHeight * 0.2);
+  const endY = targetCardY;
+  const distance = Math.max(endY - startY, 1);
+  const rawProgress = (scrollY - startY) / distance;
+  const progress = Math.min(Math.max(rawProgress, 0), 1);
+
+  document.documentElement.style.setProperty("--ambient-cosmos-progress", progress.toFixed(3));
+
+  if (progress >= 0.999) {
+    refs.bubbleLayer.style.opacity = "0";
+    refs.bubbleLayer.style.visibility = "hidden";
+    refs.starLayer.style.opacity = "1";
+    refs.starLayer.style.visibility = "visible";
+    return;
+  }
+
+  refs.bubbleLayer.style.opacity = (1 - progress).toFixed(3);
+  refs.bubbleLayer.style.visibility = "visible";
+  refs.starLayer.style.opacity = progress.toFixed(3);
+  refs.starLayer.style.visibility = "visible";
 }
 
 function randomBetween(min, max) {
@@ -1056,6 +1085,10 @@ function render() {
   } else {
     renderTalkCards(filtered);
   }
+
+  window.requestAnimationFrame(() => {
+    updateAmbientTransitionByCards();
+  });
 }
 
 async function fetchRows() {
@@ -1199,6 +1232,7 @@ async function init() {
 
   window.addEventListener("scroll", () => {
     updateScrollGradient();
+    updateAmbientTransitionByCards();
     const before = state.isNewVideoHighlightVisible;
     updateNewVideoHighlightVisibility();
     if (before !== state.isNewVideoHighlightVisible && state.viewMode === "video") {
@@ -1208,8 +1242,10 @@ async function init() {
 
   window.addEventListener("resize", () => {
     refreshAmbientViewport();
+    updateAmbientTransitionByCards();
   }, { passive: true });
   updateScrollGradient();
+  updateAmbientTransitionByCards();
   updateNewVideoHighlightVisibility();
   bindAmbientReactions();
   bindMobileScrollLock();
