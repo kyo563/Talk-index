@@ -548,31 +548,6 @@ function updateScrollGradient() {
   document.documentElement.style.setProperty("--ambient-cosmos-progress", starProgress.toFixed(3));
 }
 
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function configureAmbientBubbleMotion() {
-  const isNarrow = window.innerWidth <= 640;
-  const durationSec = isNarrow ? 12 : 15;
-  const driftDistancePx = isNarrow ? 90 : 130;
-  const driftStartPx = isNarrow ? 16 : 22;
-  document.documentElement.style.setProperty("--bubble-duration", `${durationSec}s`);
-  document.documentElement.style.setProperty("--bubble-drift-distance", `${driftDistancePx}px`);
-  document.documentElement.style.setProperty("--bubble-drift-start", `${driftStartPx}px`);
-}
-
-function seedAmbientBubbles() {
-  for (let i = 1; i <= 6; i += 1) {
-    const x = randomInt(8, 92);
-    const y = randomInt(90, 104);
-    const size = randomInt(8, 15);
-    document.documentElement.style.setProperty(`--bubble-x-${i}`, `${x}%`);
-    document.documentElement.style.setProperty(`--bubble-y-${i}`, `${y}%`);
-    document.documentElement.style.setProperty(`--bubble-size-${i}`, `${size}px`);
-  }
-}
-
 function createFormattedSpan(raw) {
   const span = document.createElement("span");
   span.appendChild(buildFormattedFragment(raw));
@@ -1118,10 +1093,6 @@ async function init() {
   updateNewVideoHighlightVisibility();
   bindAmbientReactions();
   bindMobileScrollLock();
-  configureAmbientBubbleMotion();
-  seedAmbientBubbles();
-  window.setInterval(seedAmbientBubbles, 12000);
-  window.addEventListener("resize", configureAmbientBubbleMotion, { passive: true });
 
   try {
     const rows = await fetchRows();
