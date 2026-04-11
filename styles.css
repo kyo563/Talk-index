@@ -39,18 +39,54 @@ body[data-ambient-tone="calm"] {
 }
 
 .page {
+  position: relative;
+  isolation: isolate;
   max-width: 980px;
   margin: 0 auto;
   min-height: 100vh;
   padding: 12px 12px 104px;
 }
 
+.page::before,
+.page::after {
+  content: "";
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(980px, calc(100vw - 24px));
+  pointer-events: none;
+  z-index: 0;
+}
+
+.page::before {
+  bottom: -20px;
+  height: 210px;
+  opacity: 0.18;
+  background:
+    radial-gradient(circle at 12% 88%, rgba(148, 211, 252, 0.55) 0 12px, transparent 13px),
+    radial-gradient(circle at 32% 94%, rgba(186, 230, 253, 0.45) 0 10px, transparent 11px),
+    radial-gradient(circle at 78% 90%, rgba(125, 211, 252, 0.45) 0 9px, transparent 10px),
+    radial-gradient(circle at 92% 95%, rgba(186, 230, 253, 0.5) 0 12px, transparent 13px);
+  animation: ambient-float 24s ease-in-out infinite alternate;
+}
+
+.page::after {
+  top: 72px;
+  height: 160px;
+  opacity: 0.13;
+  background:
+    radial-gradient(circle at 16% 20%, rgba(224, 242, 254, 0.9) 0 1px, transparent 2px),
+    radial-gradient(circle at 34% 36%, rgba(224, 242, 254, 0.82) 0 1px, transparent 2px),
+    radial-gradient(circle at 62% 18%, rgba(224, 242, 254, 0.85) 0 1px, transparent 2px),
+    radial-gradient(circle at 84% 30%, rgba(224, 242, 254, 0.85) 0 1px, transparent 2px);
+  animation: star-twinkle 16s ease-in-out infinite;
+}
+
 .ambient-header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  height: 20px;
-  margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
+  height: 14px;
+  margin-bottom: 4px;
   pointer-events: none;
 }
 
@@ -83,7 +119,7 @@ body[data-ambient-tone="calm"] {
   min-height: 60vh;
   background: transparent;
   border: none;
-  padding: 0;
+  padding: 48px 0 0;
 }
 
 .notice,
@@ -93,17 +129,19 @@ body[data-ambient-tone="calm"] {
 }
 
 .view-tabs-row {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  width: min(980px, calc(100vw - 24px));
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  position: sticky;
-  top: 0;
   z-index: 20;
-  background: transparent;
   padding: 6px 0;
   border-bottom: 1px solid #e2e8f0;
-  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .view-tabs {
@@ -414,11 +452,32 @@ body[data-ambient-tone="calm"] .card:focus-within {
   }
 }
 
+@keyframes ambient-float {
+  from {
+    transform: translateX(-50%) translateY(0);
+  }
+  to {
+    transform: translateX(-50%) translateY(-18px);
+  }
+}
+
+@keyframes star-twinkle {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.18;
+  }
+}
+
 /* 演出を強くしすぎないための安全弁:
    ここを上げると主張が強くなるため、opacity と duration の変更は小さく保つ。 */
 @media (prefers-reduced-motion: reduce) {
   .ambient-wave,
-  .recommend-item {
+  .recommend-item,
+  .page::before,
+  .page::after {
     animation: none;
   }
 }
@@ -430,6 +489,19 @@ body[data-ambient-tone="calm"] .card:focus-within {
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 0.78rem;
+}
+
+.no-results-fallback {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: #64748b;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.no-results-fallback:hover {
+  color: #475569;
 }
 
 .control-menu {

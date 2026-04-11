@@ -28,6 +28,8 @@ const state = {
 const RECOMMEND_LIMIT = 3;
 const NEW_VIDEO_HIGHLIGHT_COUNT = 1;
 const NEW_VIDEO_HIGHLIGHT_SCROLL_SCREENS = 2;
+const SONG_DB_URL = "https://performancerecord.github.io/uni-uta-db/";
+
 const TOKEN_STOP_WORDS = new Set([
   "の",
   "こと",
@@ -557,7 +559,19 @@ function updateServerStatus(mode, shownCount = 0) {
 }
 
 function renderNoResult() {
-  refs.results.innerHTML = "<p>条件に一致する動画がありません</p>";
+  refs.results.innerHTML = "";
+
+  const message = document.createElement("p");
+  message.textContent = "条件に一致する動画がありません";
+
+  const fallback = document.createElement("a");
+  fallback.className = "no-results-fallback";
+  fallback.href = SONG_DB_URL;
+  fallback.target = "_blank";
+  fallback.rel = "noopener noreferrer";
+  fallback.textContent = "こっちもあるよ";
+
+  refs.results.append(message, fallback);
 }
 
 function pickAmbientTone(values) {
