@@ -30,6 +30,7 @@ const NEW_VIDEO_HIGHLIGHT_COUNT = 1;
 const NEW_VIDEO_HIGHLIGHT_SCROLL_SCREENS = 2;
 const SONG_DB_URL = "https://performancerecord.github.io/uni-uta-db/";
 const GENERIC_TAG_RATIO_THRESHOLD = 1;
+const HIDDEN_DISPLAY_TAGS = new Set(["Vtuber", "雲丹ゐくら", "個人Vtuber", "バーチャルYOUTUBER"]);
 
 const TOKEN_STOP_WORDS = new Set([
   "の",
@@ -228,7 +229,10 @@ function attachDisplayTags(videos) {
   const genericTags = buildGenericTagSet(videos);
   return videos.map((video) => ({
     ...video,
-    displayTags: video.tags.filter((tag) => !genericTags.has(normalizeTag(tag))),
+    displayTags: video.tags.filter((tag) => {
+      const normalized = normalizeTag(tag);
+      return !genericTags.has(normalized) && !HIDDEN_DISPLAY_TAGS.has(normalized);
+    }),
   }));
 }
 
