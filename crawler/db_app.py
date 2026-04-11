@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from datetime import datetime, timezone
 
 import streamlit as st
+
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from crawler.models import VideoItem
 from crawler.services.spreadsheet import (
