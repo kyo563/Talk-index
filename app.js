@@ -929,14 +929,7 @@ function render() {
     filtered = filtered.filter((talk) => state.randomTalkKeys.has(talk.key));
   }
 
-  const notes = [];
-  if (state.randomSection) notes.push(`ランダムおすすめ: ${state.randomSection}`);
-  notes.push(isVideo ? "動画単位モード" : "トーク単位モード");
-  if (search.mode === "tag") notes.push("タグ検索中（#付き）");
-  if (search.mode === "normal") notes.push("通常検索中（タイトル/大見出し/小見出し）");
-  if (state.searchIndexStatus === "loading") notes.push("検索インデックス読込中…");
-  if (state.searchIndexStatus === "error") notes.push("検索インデックス読込失敗（検索は利用可）");
-  refs.notice.textContent = notes.join(" / ");
+  refs.notice.textContent = "";
 
   updateTabs();
   updateServerStatus("ok", filtered.length);
