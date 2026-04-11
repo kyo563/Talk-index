@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -42,6 +43,8 @@ if "manual_comment_candidates" not in st.session_state:
 def _load_secret_env_value(key: str, default: str = "") -> str:
     secret_value = st.secrets.get(key)
     if secret_value is not None:
+        if isinstance(secret_value, dict):
+            return json.dumps(secret_value, ensure_ascii=False).strip()
         return str(secret_value).strip()
     return os.getenv(key, default).strip()
 
