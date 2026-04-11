@@ -111,7 +111,7 @@ body::after {
   min-height: 60vh;
   background: transparent;
   border: none;
-  padding: 52px 0 0;
+  padding: 44px 0 0;
 }
 
 .notice,
@@ -131,7 +131,7 @@ body::after {
   transform: translateX(-50%);
   width: min(956px, calc(100% - 24px));
   z-index: 30;
-  background: #fff;
+  background: transparent;
   padding: 6px 0;
   border-bottom: 1px solid #e2e8f0;
 }
@@ -179,7 +179,7 @@ body::after {
 .results {
   display: grid;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 .card {
@@ -574,7 +574,7 @@ input {
 
 @media (max-width: 699px) {
   .talk-area {
-    padding-top: 56px;
+    padding-top: 48px;
   }
 
   .view-tab {
