@@ -544,6 +544,23 @@ function updateScrollGradient() {
   const ratio = Math.min(scrollTop / maxScroll, 1);
   const color = lerpColorHex("#87ceeb", "#045a8d", ratio);
   document.documentElement.style.setProperty("--scroll-marine", color);
+  const starProgress = Math.min(Math.max((ratio - 0.7) / 0.3, 0), 1);
+  document.documentElement.style.setProperty("--ambient-cosmos-progress", starProgress.toFixed(3));
+}
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function seedAmbientBubbles() {
+  for (let i = 1; i <= 6; i += 1) {
+    const x = randomInt(8, 92);
+    const y = randomInt(90, 104);
+    const size = randomInt(6, 13);
+    document.documentElement.style.setProperty(`--bubble-x-${i}`, `${x}%`);
+    document.documentElement.style.setProperty(`--bubble-y-${i}`, `${y}%`);
+    document.documentElement.style.setProperty(`--bubble-size-${i}`, `${size}px`);
+  }
 }
 
 function createFormattedSpan(raw) {
@@ -1091,6 +1108,7 @@ async function init() {
   updateNewVideoHighlightVisibility();
   bindAmbientReactions();
   bindMobileScrollLock();
+  seedAmbientBubbles();
 
   try {
     const rows = await fetchRows();
