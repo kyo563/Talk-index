@@ -103,6 +103,15 @@ function parseDateValue(raw) {
   return d.toISOString().slice(0, 10);
 }
 
+function compareDateDesc(a, b) {
+  const aDate = parseDateValue(a);
+  const bDate = parseDateValue(b);
+  if (!aDate && !bDate) return 0;
+  if (!aDate) return 1;
+  if (!bDate) return -1;
+  return bDate.localeCompare(aDate);
+}
+
 function normalizeToken(rawToken) {
   const token = text(rawToken).toLowerCase();
   if (!token) return "";
@@ -260,6 +269,7 @@ function ensureTalkSection(bySection, row) {
       key: row.section,
       name: row.section,
       sectionUrl: row.sectionUrl,
+      date: "",
       subsections: [],
       thumb: "",
       hasSingingVideo: false,
@@ -282,6 +292,7 @@ function groupTalks(rows) {
   rows.forEach((row) => {
     if (!row.section || !isTalkSectionVisible(row.section)) return;
     const talk = ensureTalkSection(bySection, row);
+    if (compareDateDesc(row.date, talk.date) < 0) talk.date = row.date;
     if (!talk.thumb && row.url) talk.thumb = thumbnailUrl(row.url);
     if (isSingingVideoRow(row)) talk.hasSingingVideo = true;
 
@@ -298,6 +309,7 @@ function groupTalks(rows) {
     key: talk.key,
     name: talk.name,
     sectionUrl: talk.sectionUrl,
+    date: talk.date,
     thumb: talk.thumb,
     hasSingingVideo: talk.hasSingingVideo,
     subsections: talk.subsections,
@@ -1090,6 +1102,8 @@ function render() {
   let filtered = isVideo
     ? state.videos.filter((video) => hitVideo(video, search))
     : state.talks.filter((talk) => hitTalk(talk, search));
+
+  filtered = filtered.slice().sort((a, b) => compareDateDesc(a.date, b.date));
 
   if (!isVideo && state.randomTalkKeys) {
     filtered = filtered.filter((talk) => state.randomTalkKeys.has(talk.key));
