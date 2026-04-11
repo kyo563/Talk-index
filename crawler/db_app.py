@@ -53,19 +53,26 @@ def _load_spreadsheet_id() -> str:
     return normalize_spreadsheet_id(os.getenv("SPREADSHEET_ID", ""))
 
 
-def load_settings() -> dict[str, str]:
+def _resolve_spreadsheet_id(manual_input: str) -> str:
+    manual_value = normalize_spreadsheet_id((manual_input or "").strip())
+    if manual_value:
+        return manual_value
+    return _load_spreadsheet_id()
+
+
+def load_settings(manual_spreadsheet_id: str = "") -> dict[str, str]:
     return {
         "youtube_api_key": _load_secret_env_value("YOUTUBE_API_KEY"),
         "channel_id": _load_secret_env_value("YOUTUBE_CHANNEL_ID"),
-        "spreadsheet_id": _load_spreadsheet_id(),
+        "spreadsheet_id": _resolve_spreadsheet_id(manual_spreadsheet_id),
         "worksheet_name": _load_secret_env_value("SPREADSHEET_WORKSHEET_NAME", "索引") or "索引",
         "title_list_worksheet": _load_secret_env_value("TITLE_LIST_WORKSHEET_NAME", "タイトルリスト") or "タイトルリスト",
         "service_account_json": _load_secret_env_value("GOOGLE_SERVICE_ACCOUNT_JSON"),
     }
 
 
-def run_manual_load(request_count: int) -> dict:
-    settings = load_settings()
+def run_manual_load(request_count: int, manual_spreadsheet_id: str) -> dict:
+    settings = load_settings(manual_spreadsheet_id=manual_spreadsheet_id)
 
     if not settings["channel_id"]:
         raise RuntimeError("YOUTUBE_CHANNEL_ID が未設定です。")
@@ -127,11 +134,18 @@ def run_manual_load(request_count: int) -> dict:
     }
 
 
-settings_preview = load_settings()
+manual_spreadsheet_input = st.text_input(
+    "スプレッドシートID または URL（手動指定）",
+    value="",
+    placeholder="例: 1AbC... または https://docs.google.com/spreadsheets/d/...",
+    help="入力がある場合は、st.secrets / 環境変数より優先して使用します。",
+)
+
+settings_preview = load_settings(manual_spreadsheet_id=manual_spreadsheet_input)
 missing = []
 if not _load_secret_env_value("YOUTUBE_CHANNEL_ID"):
     missing.append("YOUTUBE_CHANNEL_ID")
-if not _load_spreadsheet_id():
+if not settings_preview["spreadsheet_id"]:
     missing.append("SPREADSHEET_ID")
 if not _load_secret_env_value("GOOGLE_SERVICE_ACCOUNT_JSON"):
     missing.append("GOOGLE_SERVICE_ACCOUNT_JSON")
@@ -194,7 +208,7 @@ if st.session_state.manual_comment_candidates and "manual_video_item" in st.sess
 
     write_manual = st.button("選択コメントで記帳", type="primary", use_container_width=True)
     if write_manual:
-        settings = load_settings()
+        settings = load_settings(manual_spreadsheet_id=manual_spreadsheet_input)
         if not settings["spreadsheet_id"]:
             st.error("SPREADSHEET_ID が未設定です。")
         elif not settings["service_account_json"]:
@@ -235,7 +249,7 @@ run = st.button("読み込み実行", use_container_width=True)
 if run:
     started_at = datetime.now(timezone.utc).isoformat()
     try:
-        result = run_manual_load(int(count))
+        result = run_manual_load(int(count), manual_spreadsheet_input)
         st.session_state.manual_logs.append(
             {
                 "at_utc": started_at,

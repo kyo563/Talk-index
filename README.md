@@ -143,6 +143,7 @@ streamlit run crawler/db_app.py
 - 「読み込み実行」を押すたびに 1件（または指定件数）を取り込み
 - 記帳先は `st.secrets` の `SPREADSHEET_ID` を使用（GitHub Actions と同じIDを指定）
 - `SPREADSHEET_ID` は「スプレッドシートID」またはスプレッドシートURLのどちらでも指定可能（内部でIDへ正規化）
+- 画面上の「スプレッドシートID または URL（手動指定）」に入力した値がある場合、`st.secrets` / 環境変数より優先して使用
 - 実行ごとに成否（成功/失敗）を画面に表示
 
 ## GitHub Actions で毎日9時に自動実行（JST）
