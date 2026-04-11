@@ -47,9 +47,9 @@ def _load_secret_env_value(key: str, default: str = "") -> str:
 
 def _load_spreadsheet_id() -> str:
     secret_value = st.secrets.get("SPREADSHEET_ID")
-    if secret_value is None:
-        return ""
-    return str(secret_value).strip()
+    if secret_value is not None:
+        return str(secret_value).strip()
+    return os.getenv("SPREADSHEET_ID", "").strip()
 
 
 def load_settings() -> dict[str, str]:
@@ -131,7 +131,7 @@ missing = []
 if not _load_secret_env_value("YOUTUBE_CHANNEL_ID"):
     missing.append("YOUTUBE_CHANNEL_ID")
 if not _load_spreadsheet_id():
-    missing.append("SPREADSHEET_ID (st.secrets)")
+    missing.append("SPREADSHEET_ID")
 if not _load_secret_env_value("GOOGLE_SERVICE_ACCOUNT_JSON"):
     missing.append("GOOGLE_SERVICE_ACCOUNT_JSON")
 if missing:
