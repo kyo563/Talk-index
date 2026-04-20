@@ -6,7 +6,7 @@ from typing import Callable
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from crawler.models import VideoItem
+from crawler.models import TimestampSource, VideoItem
 from crawler.utils import extract_channel_hint, looks_like_channel_id
 
 Logger = Callable[[str], None]
@@ -141,11 +141,9 @@ def fetch_channel_videos(
 
                 snippet = item.get("snippet", {})
 
-                # 配信予定/ライブ中は除外
                 if snippet.get("liveBroadcastContent") != "none":
                     continue
 
-                # ライブ配信アーカイブのみ対象（開始/終了時刻があるもの）
                 live_details = item.get("liveStreamingDetails", {})
                 if not live_details.get("actualStartTime") or not live_details.get("actualEndTime"):
                     continue
@@ -158,9 +156,16 @@ def fetch_channel_videos(
                     or ""
                 )
 
+                description = (snippet.get("description", "") or "").strip()
+                timestamp_sources: list[TimestampSource] = []
                 timestamp_comment = ""
                 try:
-                    timestamp_comment = extract_timestamp_comment(youtube, video_id)
+                    timestamp_sources = fetch_timestamp_sources(
+                        youtube,
+                        video_id,
+                        description=description,
+                    )
+                    timestamp_comment = _choose_best_comment_source_text(timestamp_sources)
                 except YouTubeServiceError as exc:
                     if log:
                         log(f"コメント抽出スキップ: video_id={video_id}, reason={exc}")
@@ -174,6 +179,8 @@ def fetch_channel_videos(
                         thumbnail_url=thumb_url,
                         tags=snippet.get("tags", []),
                         timestamp_comment=timestamp_comment,
+                        description=description,
+                        timestamp_sources=timestamp_sources,
                     )
                 )
 
@@ -184,16 +191,36 @@ def fetch_channel_videos(
     return videos
 
 
-def extract_timestamp_comment(youtube, video_id: str) -> str:
-    if not video_id.strip():
-        return ""
+def fetch_timestamp_sources(
+    youtube,
+    video_id: str,
+    description: str | None = None,
+) -> list[TimestampSource]:
+    value = (video_id or "").strip()
+    if not value:
+        return []
+
+    results: list[TimestampSource] = []
+    normalized_description = (description or "").strip()
+    if normalized_description:
+        ts_count = _count_timestamps(normalized_description)
+        if ts_count > 0:
+            results.append(
+                TimestampSource(
+                    source_type="description",
+                    text=normalized_description,
+                    like_count=0,
+                    timestamp_count=ts_count,
+                    source_id=f"description:{value}",
+                )
+            )
 
     try:
         response = (
             youtube.commentThreads()
             .list(
                 part="snippet,replies",
-                videoId=video_id,
+                videoId=value,
                 order="relevance",
                 textFormat="plainText",
                 maxResults=100,
@@ -201,21 +228,53 @@ def extract_timestamp_comment(youtube, video_id: str) -> str:
             .execute()
         )
     except HttpError as exc:
-        raise YouTubeServiceError(f"commentThreads.list でエラー: video_id={video_id}, detail={exc}") from exc
+        raise YouTubeServiceError(f"commentThreads.list でエラー: video_id={value}, detail={exc}") from exc
 
-    best_text = ""
-    best_score = (-1, -1, -1)  # timestamp_count, like_count, text_length
-    for row in _collect_timestamp_comment_rows(youtube, response):
-        score = (
-            int(row["timestamp_count"]),
-            int(row["like_count"]),
-            len(str(row["text"])),
+    for item in response.get("items", []):
+        thread_snippet = item.get("snippet", {})
+        top_level = thread_snippet.get("topLevelComment", {})
+        top_level_id = (top_level.get("id") or item.get("id") or "").strip()
+
+        top_level_snippet = top_level.get("snippet", {})
+        top_source = _build_comment_source(
+            snippet=top_level_snippet,
+            source_type="top",
+            source_id=top_level_id,
+            parent_id="",
         )
-        if score > best_score:
-            best_score = score
-            best_text = str(row["text"])
+        if top_source:
+            results.append(top_source)
 
-    return best_text
+        replies = _fetch_all_replies(youtube, item, top_level_id=top_level_id)
+        for reply in replies:
+            reply_id = (reply.get("id") or "").strip()
+            reply_source = _build_comment_source(
+                snippet=reply.get("snippet", {}),
+                source_type="reply",
+                source_id=reply_id,
+                parent_id=top_level_id,
+            )
+            if reply_source:
+                results.append(reply_source)
+
+    results.sort(
+        key=lambda src: (
+            1 if src.source_type == "description" else 0,
+            int(src.timestamp_count),
+            int(src.like_count),
+            len(src.text),
+        ),
+        reverse=True,
+    )
+    return results
+
+
+def extract_timestamp_comment(youtube, video_id: str) -> str:
+    if not video_id.strip():
+        return ""
+
+    sources = fetch_timestamp_sources(youtube, video_id)
+    return _choose_best_comment_source_text(sources)
 
 
 def list_timestamp_comments(
@@ -365,6 +424,8 @@ def fetch_video_item(youtube, video_id: str) -> VideoItem:
         or thumbs.get("default", {}).get("url")
         or ""
     )
+    description = (snippet.get("description", "") or "").strip()
+    timestamp_sources = fetch_timestamp_sources(youtube, value, description=description)
 
     return VideoItem(
         video_id=value,
@@ -373,5 +434,49 @@ def fetch_video_item(youtube, video_id: str) -> VideoItem:
         published_at=snippet.get("publishedAt", ""),
         thumbnail_url=thumb_url,
         tags=snippet.get("tags", []),
-        timestamp_comment="",
+        timestamp_comment=_choose_best_comment_source_text(timestamp_sources),
+        description=description,
+        timestamp_sources=timestamp_sources,
     )
+
+
+def _count_timestamps(text: str) -> int:
+    timestamps = TIMESTAMP_PATTERN.findall(text or "")
+    return len(set(timestamps)) if timestamps else 0
+
+
+def _build_comment_source(
+    snippet: dict,
+    source_type: str,
+    source_id: str,
+    parent_id: str,
+) -> TimestampSource | None:
+    text = (snippet.get("textOriginal", "") or "").strip()
+    if not text:
+        return None
+
+    ts_count = _count_timestamps(text)
+    if ts_count <= 0:
+        return None
+
+    return TimestampSource(
+        source_type=source_type,  # type: ignore[arg-type]
+        text=text,
+        like_count=int(snippet.get("likeCount", 0) or 0),
+        timestamp_count=ts_count,
+        source_id=source_id,
+        parent_id=parent_id,
+        author=(snippet.get("authorDisplayName", "") or "").strip(),
+    )
+
+
+def _choose_best_comment_source_text(sources: list[TimestampSource]) -> str:
+    comment_sources = [s for s in sources if s.source_type in {"top", "reply"}]
+    if not comment_sources:
+        return ""
+
+    comment_sources.sort(
+        key=lambda src: (src.timestamp_count, src.like_count, len(src.text)),
+        reverse=True,
+    )
+    return comment_sources[0].text
