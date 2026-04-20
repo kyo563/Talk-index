@@ -13,9 +13,15 @@ from crawler.services.spreadsheet import (
     read_ordered_video_ids_from_title_list,
     read_title_list_refresh_state,
     upsert_videos_by_video_id,
+    upsert_title_list_rows,
     write_title_list_refresh_state,
 )
-from crawler.services.youtube import build_youtube_client, fetch_channel_videos, fetch_video_item
+from crawler.services.youtube import (
+    build_youtube_client,
+    fetch_channel_videos,
+    fetch_video_item,
+    fetch_video_metadata_map,
+)
 
 
 def _load_positive_int_env(name: str, default: int) -> int:
@@ -51,6 +57,66 @@ def _select_cyclic_targets(ordered_video_ids: list[str], current_cursor: int, li
     return selected, next_cursor
 
 
+def _parse_iso_datetime(raw: str) -> datetime | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _select_recheck_ids(
+    ordered_video_ids: list[str],
+    current_cursor: int,
+    limit: int,
+    recent_hours: int,
+    videos_by_id: dict[str, object],
+) -> tuple[list[str], int]:
+    if limit <= 0 or not ordered_video_ids:
+        return [], current_cursor if current_cursor >= 0 else 0
+
+    now = datetime.now(timezone.utc)
+    threshold = now.timestamp() - (recent_hours * 3600)
+
+    recent_candidates: list[tuple[float, str]] = []
+    for video_id in ordered_video_ids:
+        video = videos_by_id.get(video_id)
+        published_at = getattr(video, "published_at", "")
+        published = _parse_iso_datetime(str(published_at))
+        if not published:
+            continue
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        published_ts = published.timestamp()
+        if published_ts < threshold:
+            continue
+        recent_candidates.append((published_ts, video_id))
+
+    recent_candidates.sort(key=lambda x: x[0], reverse=True)
+    selected: list[str] = []
+    selected_set: set[str] = set()
+    for _, video_id in recent_candidates:
+        if len(selected) >= limit:
+            break
+        selected.append(video_id)
+        selected_set.add(video_id)
+
+    remaining = limit - len(selected)
+    cyclic_selected, next_cursor = _select_cyclic_targets(ordered_video_ids, current_cursor, remaining)
+    for video_id in cyclic_selected:
+        if len(selected) >= limit:
+            break
+        if video_id in selected_set:
+            continue
+        selected.append(video_id)
+        selected_set.add(video_id)
+
+    return selected, next_cursor
+
+
 def main() -> None:
     youtube_api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
     channel_id = os.getenv("YOUTUBE_CHANNEL_ID", "").strip()
@@ -76,6 +142,7 @@ def main() -> None:
 
     daily_new_video_limit = _load_positive_int_env("DAILY_NEW_VIDEO_LIMIT", 2)
     daily_recheck_limit = _load_positive_int_env("DAILY_RECHECK_LIMIT", 5)
+    daily_recent_recheck_hours = _load_positive_int_env("DAILY_RECENT_RECHECK_HOURS", 72)
 
     youtube = build_youtube_client(youtube_api_key)
     gspread_client = build_gspread_client(service_account_json)
@@ -135,10 +202,16 @@ def main() -> None:
     )
     current_cursor = int(refresh_state.get("refresh_cursor", 0) or 0)
 
-    recheck_ids, next_cursor = _select_cyclic_targets(
+    videos_by_id = fetch_video_metadata_map(youtube, ordered_title_list_ids)
+    for video in fetched_candidates:
+        videos_by_id[video.video_id] = video
+
+    recheck_ids, next_cursor = _select_recheck_ids(
         ordered_video_ids=ordered_title_list_ids,
         current_cursor=current_cursor,
         limit=daily_recheck_limit,
+        recent_hours=daily_recent_recheck_hours,
+        videos_by_id=videos_by_id,
     )
 
     recheck_videos = []
@@ -152,6 +225,12 @@ def main() -> None:
         client=gspread_client,
         spreadsheet_id=spreadsheet_id,
         worksheet_name=worksheet_name,
+        videos=recheck_videos,
+    )
+    title_updated_count, title_appended_count = upsert_title_list_rows(
+        client=gspread_client,
+        spreadsheet_id=spreadsheet_id,
+        worksheet_name=title_list_worksheet,
         videos=recheck_videos,
     )
 
@@ -177,8 +256,11 @@ def main() -> None:
         f"appended={appended_count}, "
         f"ordered_title_list_count={len(ordered_title_list_ids)}, "
         f"recheck_limit={daily_recheck_limit}, "
+        f"recent_recheck_hours={daily_recent_recheck_hours}, "
         f"recheck_selected_count={len(recheck_ids)}, "
         f"recheck_upserted_rows={rechecked_count}, "
+        f"title_recheck_updated={title_updated_count}, "
+        f"title_recheck_appended={title_appended_count}, "
         f"current_cursor={current_cursor}, "
         f"next_cursor={next_cursor}, "
         f"updated_at={updated_at}"

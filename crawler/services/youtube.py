@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Callable
 
@@ -11,6 +12,7 @@ from crawler.utils import extract_channel_hint, looks_like_channel_id
 
 Logger = Callable[[str], None]
 TIMESTAMP_PATTERN = re.compile(r"\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b")
+DEFAULT_TIMESTAMP_COMMENT_THREAD_LIMIT = 300
 
 
 class YouTubeServiceError(RuntimeError):
@@ -215,22 +217,9 @@ def fetch_timestamp_sources(
                 )
             )
 
-    try:
-        response = (
-            youtube.commentThreads()
-            .list(
-                part="snippet,replies",
-                videoId=value,
-                order="relevance",
-                textFormat="plainText",
-                maxResults=100,
-            )
-            .execute()
-        )
-    except HttpError as exc:
-        raise YouTubeServiceError(f"commentThreads.list でエラー: video_id={value}, detail={exc}") from exc
-
-    for item in response.get("items", []):
+    thread_limit = _load_comment_thread_limit()
+    thread_items = _fetch_comment_threads(youtube, value, thread_limit)
+    for item in thread_items:
         thread_snippet = item.get("snippet", {})
         top_level = thread_snippet.get("topLevelComment", {})
         top_level_id = (top_level.get("id") or item.get("id") or "").strip()
@@ -267,6 +256,56 @@ def fetch_timestamp_sources(
         reverse=True,
     )
     return results
+
+
+def _load_comment_thread_limit() -> int:
+    raw = os.getenv("TIMESTAMP_COMMENT_THREAD_LIMIT", "").strip()
+    if not raw:
+        return DEFAULT_TIMESTAMP_COMMENT_THREAD_LIMIT
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise YouTubeServiceError("TIMESTAMP_COMMENT_THREAD_LIMIT は整数で指定してください。") from exc
+    if value <= 0:
+        raise YouTubeServiceError("TIMESTAMP_COMMENT_THREAD_LIMIT は1以上で指定してください。")
+    return value
+
+
+def _fetch_comment_threads(youtube, video_id: str, thread_limit: int) -> list[dict]:
+    items: list[dict] = []
+    page_token = None
+
+    while len(items) < thread_limit:
+        per_page = min(100, thread_limit - len(items))
+        try:
+            response = (
+                youtube.commentThreads()
+                .list(
+                    part="snippet,replies",
+                    videoId=video_id,
+                    # 手動運用との整合のため relevance を維持しつつ、複数ページを回収する。
+                    order="relevance",
+                    textFormat="plainText",
+                    maxResults=per_page,
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise YouTubeServiceError(
+                f"commentThreads.list でエラー: video_id={video_id}, detail={exc}"
+            ) from exc
+
+        page_items = response.get("items", [])
+        if not page_items:
+            break
+
+        items.extend(page_items)
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    return items
 
 
 def extract_timestamp_comment(youtube, video_id: str) -> str:
@@ -438,6 +477,49 @@ def fetch_video_item(youtube, video_id: str) -> VideoItem:
         description=description,
         timestamp_sources=timestamp_sources,
     )
+
+
+def fetch_video_metadata_map(youtube, video_ids: list[str]) -> dict[str, VideoItem]:
+    normalized_ids = [video_id.strip() for video_id in video_ids if video_id.strip()]
+    if not normalized_ids:
+        return {}
+
+    result: dict[str, VideoItem] = {}
+    for i in range(0, len(normalized_ids), 50):
+        chunk_ids = normalized_ids[i : i + 50]
+        try:
+            response = (
+                youtube.videos()
+                .list(
+                    part="snippet",
+                    id=",".join(chunk_ids),
+                    maxResults=len(chunk_ids),
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise YouTubeServiceError(
+                f"videos.list でメタデータ取得に失敗: count={len(chunk_ids)}, detail={exc}"
+            ) from exc
+
+        for item in response.get("items", []):
+            video_id = (item.get("id") or "").strip()
+            if not video_id:
+                continue
+            snippet = item.get("snippet", {})
+            result[video_id] = VideoItem(
+                video_id=video_id,
+                title=(snippet.get("title", "") or "").strip(),
+                url=f"https://www.youtube.com/watch?v={video_id}",
+                published_at=(snippet.get("publishedAt", "") or "").strip(),
+                thumbnail_url="",
+                tags=[],
+                timestamp_comment="",
+                description="",
+                timestamp_sources=[],
+            )
+
+    return result
 
 
 def _count_timestamps(text: str) -> int:

@@ -31,6 +31,7 @@ TITLE_LIST_STATE_RANGE = "F1:G3"
 TITLE_LIST_STATE_HEADER = ["key", "value"]
 TITLE_LIST_STATE_REFRESH_CURSOR_KEY = "refresh_cursor"
 TITLE_LIST_STATE_UPDATED_AT_KEY = "updated_at"
+TITLE_LIST_HEADER = ["タイトル", "日付", "URL"]
 
 
 def build_gspread_client(service_account_json: str) -> gspread.Client:
@@ -441,8 +442,11 @@ def upsert_videos_by_video_id(
     final_rows.extend(_pad_row(row, max_cols) for row in existing_body_rows)
     final_rows.extend(_pad_row(row, max_cols) for row in replacement_rows)
 
-    sheet.clear()
-    sheet.update("A1", final_rows, value_input_option="RAW")
+    last_row = len(values)
+    if last_row > 1:
+        sheet.batch_clear([f"A2:H{last_row}"])
+    if final_rows[1:]:
+        sheet.update("A2", final_rows[1:], value_input_option="RAW")
     return len(replacement_rows)
 
 
@@ -458,9 +462,11 @@ def append_title_list_rows(
     book = client.open_by_key(spreadsheet_id)
     sheet = _get_or_create_sheet(book, worksheet_name)
 
-    header = ["動画投稿日付", "動画タイトル", "動画固有ID"]
-    if not sheet.get_all_values():
-        sheet.append_row(header, value_input_option="RAW")
+    existing_header = sheet.get("A1:C1")
+    header_values = existing_header[0] if existing_header else []
+    normalized_header = [(cell or "").strip() for cell in header_values]
+    if normalized_header != TITLE_LIST_HEADER:
+        sheet.update("A1:C1", [TITLE_LIST_HEADER], value_input_option="RAW")
 
     existing_ids = read_video_ids_from_url_column(
         client=client,
@@ -476,16 +482,90 @@ def append_title_list_rows(
             continue
         rows.append(
             [
-                _to_jst_date(video.published_at),
                 video.title,
-                video.video_id,
+                _to_jst_date(video.published_at),
+                video.url,
             ]
         )
 
     if rows:
-        sheet.append_rows(rows, value_input_option="RAW")
+        existing_values = sheet.get_all_values()
+        next_row = _next_data_row_for_title_list(existing_values)
+        sheet.update(f"A{next_row}:C{next_row + len(rows) - 1}", rows, value_input_option="RAW")
 
     return len(rows)
+
+
+def upsert_title_list_rows(
+    client: gspread.Client,
+    spreadsheet_id: str,
+    worksheet_name: str,
+    videos: Iterable[VideoItem],
+) -> tuple[int, int]:
+    if not spreadsheet_id.strip():
+        raise SpreadsheetServiceError("SPREADSHEET_ID が未設定です。")
+
+    target_videos = [video for video in videos if video.video_id.strip()]
+    if not target_videos:
+        return 0, 0
+
+    book = client.open_by_key(spreadsheet_id)
+    sheet = _get_or_create_sheet(book, worksheet_name)
+
+    existing_header = sheet.get("A1:C1")
+    header_values = existing_header[0] if existing_header else []
+    normalized_header = [(cell or "").strip() for cell in header_values]
+    if normalized_header != TITLE_LIST_HEADER:
+        sheet.update("A1:C1", [TITLE_LIST_HEADER], value_input_option="RAW")
+
+    rows = sheet.get_all_values()
+    id_to_row_index: dict[str, int] = {}
+    for idx, row in enumerate(rows[1:], start=2):
+        video_id = extract_video_id_from_url(row[2] if len(row) >= 3 else "")
+        if not video_id:
+            continue
+        if video_id not in id_to_row_index:
+            id_to_row_index[video_id] = idx
+
+    updates: list[dict[str, str | list[list[str]]]] = []
+    append_rows: list[list[str]] = []
+    updated = 0
+    appended = 0
+    for video in target_videos:
+        row_values = [video.title, _to_jst_date(video.published_at), video.url]
+        target_row = id_to_row_index.get(video.video_id)
+        if target_row:
+            updates.append(
+                {
+                    "range": f"A{target_row}:C{target_row}",
+                    "values": [row_values],
+                }
+            )
+            updated += 1
+            continue
+        append_rows.append(row_values)
+        appended += 1
+
+    if updates:
+        sheet.batch_update(updates, value_input_option="RAW")
+    if append_rows:
+        next_row = _next_data_row_for_title_list(rows)
+        sheet.update(
+            f"A{next_row}:C{next_row + len(append_rows) - 1}",
+            append_rows,
+            value_input_option="RAW",
+        )
+
+    return updated, appended
+
+
+def _next_data_row_for_title_list(values: list[list[str]]) -> int:
+    last_data_row = 1
+    for idx, row in enumerate(values[1:], start=2):
+        a_to_c = row[:3]
+        if any((cell or "").strip() for cell in a_to_c):
+            last_data_row = idx
+    return last_data_row + 1
 
 
 # 互換のため残す（主経路では未使用）

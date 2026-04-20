@@ -8,7 +8,7 @@ from crawler.models import TimestampSource
 TS_PATTERN = re.compile(r"(?<!\d)(?P<ts>(?:\d{1,2}:)?\d{1,2}:\d{2})(?!\d)")
 LINE_END_PAREN_TS_PATTERN = re.compile(r"^(?P<label>.*?)[\(（]\s*(?P<ts>(?:\d{1,2}:)?\d{1,2}:\d{2})\s*[\)）]\s*$")
 LEADING_TS_PATTERN = re.compile(r"^\s*(?P<ts>(?:\d{1,2}:)?\d{1,2}:\d{2})\s*(?P<label>.*)$")
-MINOR_PREFIX_PATTERN = re.compile(r"^\s*(?:[└┝├]|[-・●◦])\s*")
+MINOR_PREFIX_PATTERN = re.compile(r"^\s*(?:[└┝├]|[-・●◦*])\s*")
 MAJOR_BRACKET_PATTERN = re.compile(r"【\s*(?P<label>[^】]+?)\s*】")
 NOISE_PATTERN = re.compile(r"^[\s\-:：|／/、。・･]+|[\s\-:：|／/、。・･]+$")
 
@@ -219,15 +219,12 @@ def _looks_like_major(ts: str, label: str, major_hint: str, has_minor_marker: bo
     if has_minor_marker:
         return False
 
+    if major_hint:
+        return True
+
     parts = ts.split(":")
     if len(parts) == 3:
-        hours_text = parts[0]
-        if len(hours_text) >= 2:
-            return True
-        if major_hint:
-            return True
-        if label.startswith("【") and "】" in label:
-            return True
+        return True
 
     return False
 
