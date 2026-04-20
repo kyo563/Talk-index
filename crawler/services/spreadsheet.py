@@ -31,7 +31,8 @@ TITLE_LIST_STATE_RANGE = "F1:G3"
 TITLE_LIST_STATE_HEADER = ["key", "value"]
 TITLE_LIST_STATE_REFRESH_CURSOR_KEY = "refresh_cursor"
 TITLE_LIST_STATE_UPDATED_AT_KEY = "updated_at"
-TITLE_LIST_HEADER = ["タイトル", "日付", "URL"]
+TITLE_LIST_HEADER = ["日付", "タイトル", "動画固有ID"]
+DATE_ONLY_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def build_gspread_client(service_account_json: str) -> gspread.Client:
@@ -482,9 +483,9 @@ def append_title_list_rows(
             continue
         rows.append(
             [
-                video.title,
                 _to_jst_date(video.published_at),
-                video.url,
+                video.title,
+                video.video_id,
             ]
         )
 
@@ -532,7 +533,7 @@ def upsert_title_list_rows(
     updated = 0
     appended = 0
     for video in target_videos:
-        row_values = [video.title, _to_jst_date(video.published_at), video.url]
+        row_values = [_to_jst_date(video.published_at), video.title, video.video_id]
         target_row = id_to_row_index.get(video.video_id)
         if target_row:
             updates.append(
@@ -557,6 +558,70 @@ def upsert_title_list_rows(
         )
 
     return updated, appended
+
+
+def repair_title_list_schema(
+    client: gspread.Client,
+    spreadsheet_id: str,
+    worksheet_name: str,
+) -> int:
+    if not spreadsheet_id.strip():
+        raise SpreadsheetServiceError("SPREADSHEET_ID が未設定です。")
+
+    book = client.open_by_key(spreadsheet_id)
+    sheet = _get_or_create_sheet(book, worksheet_name)
+
+    existing_header = sheet.get("A1:C1")
+    header_values = existing_header[0] if existing_header else []
+    normalized_header = [(cell or "").strip() for cell in header_values]
+    if normalized_header != TITLE_LIST_HEADER:
+        sheet.update("A1:C1", [TITLE_LIST_HEADER], value_input_option="RAW")
+
+    rows = sheet.get_all_values()
+    if len(rows) <= 1:
+        return 0
+
+    updates: list[dict[str, str | list[list[str]]]] = []
+    for idx, row in enumerate(rows[1:], start=2):
+        old_a = (row[0] if len(row) >= 1 else "").strip()
+        old_b = (row[1] if len(row) >= 2 else "").strip()
+        old_c = (row[2] if len(row) >= 3 else "").strip()
+        extracted_video_id = extract_video_id_from_url(old_c)
+
+        is_broken_row = (
+            not _is_yyyy_mm_dd(old_a)
+            and _is_yyyy_mm_dd(old_b)
+            and _is_youtube_url(old_c)
+            and bool(extracted_video_id)
+        )
+        if not is_broken_row:
+            continue
+
+        updates.append(
+            {
+                "range": f"A{idx}:C{idx}",
+                "values": [[old_b, old_a, extracted_video_id]],
+            }
+        )
+
+    if not updates:
+        return 0
+
+    sheet.batch_update(updates, value_input_option="RAW")
+    return len(updates)
+
+
+def _is_yyyy_mm_dd(value: str) -> bool:
+    return bool(DATE_ONLY_PATTERN.fullmatch((value or "").strip()))
+
+
+def _is_youtube_url(value: str) -> bool:
+    raw = (value or "").strip()
+    if not raw:
+        return False
+    parsed = urlparse(raw)
+    host = parsed.netloc.lower()
+    return "youtube.com" in host or "youtu.be" in host
 
 
 def _next_data_row_for_title_list(values: list[list[str]]) -> int:

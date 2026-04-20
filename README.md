@@ -164,6 +164,11 @@ npm run ci:build
 - 巡回状態は `タイトルリスト!F1:G3` に保存します。
   - `F2/G2`: `refresh_cursor`
   - `F3/G3`: `updated_at`
+- `タイトルリスト` の列定義（A:C）は次で固定です。
+  - `A列`: `日付`
+  - `B列`: `タイトル`
+  - `C列`: `動画固有ID`
+  - `F1:G3`: 状態セル（`key/value`, `refresh_cursor`, `updated_at`）
 - `タイトルリスト` は並び順を固定で運用してください（並び替えしない）。
 - 1回の daily crawl で、**新規2件 + 再評価5件** を処理します（環境変数で変更可）。
 - 再評価は「公開後72時間以内の動画」を優先し、残りを `refresh_cursor` 巡回で補完します（`DAILY_RECENT_RECHECK_HOURS` で変更可）。

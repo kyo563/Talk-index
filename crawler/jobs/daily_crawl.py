@@ -12,6 +12,7 @@ from crawler.services.spreadsheet import (
     read_existing_video_ids,
     read_ordered_video_ids_from_title_list,
     read_title_list_refresh_state,
+    repair_title_list_schema,
     upsert_videos_by_video_id,
     upsert_title_list_rows,
     write_title_list_refresh_state,
@@ -152,6 +153,11 @@ def main() -> None:
         spreadsheet_id=spreadsheet_id,
         worksheet_name=title_list_worksheet,
     )
+    repaired_title_list_rows = repair_title_list_schema(
+        client=gspread_client,
+        spreadsheet_id=spreadsheet_id,
+        worksheet_name=title_list_worksheet,
+    )
 
     title_list_ids = set(
         read_ordered_video_ids_from_title_list(
@@ -250,6 +256,7 @@ def main() -> None:
         "done: "
         f"channel_id={channel_id}, "
         f"fetched_candidates={len(fetched_candidates)}, "
+        f"title_list_repaired={repaired_title_list_rows}, "
         f"new_video_limit={daily_new_video_limit}, "
         f"new_selected={len(new_videos)}, "
         f"title_list_appended={title_list_appended}, "

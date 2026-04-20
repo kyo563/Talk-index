@@ -135,8 +135,8 @@ class SpreadsheetTests(unittest.TestCase):
         )
 
         self.assertEqual(count, 1)
-        self.assertEqual(sheet.get("A1:C1")[0], ["タイトル", "日付", "URL"])
-        self.assertEqual(sheet.get("A2:C2")[0][0], "new title")
+        self.assertEqual(sheet.get("A1:C1")[0], ["日付", "タイトル", "動画固有ID"])
+        self.assertEqual(sheet.get("A2:C2")[0], ["2026-04-19", "new title", "abc123def45"])
         self.assertEqual(sheet.get("F1:G3")[0], ["key", "value"])
 
     def test_upsert_videos_no_sheet_clear(self):
@@ -156,7 +156,7 @@ class SpreadsheetTests(unittest.TestCase):
 
     def test_upsert_title_list_rows_updates_existing(self):
         sheet = FakeWorksheet()
-        sheet.update("A1:C2", [["タイトル", "日付", "URL"], ["old", "2026-04-01", "https://www.youtube.com/watch?v=abc123def45"]])
+        sheet.update("A1:C2", [["日付", "タイトル", "動画固有ID"], ["2026-04-01", "old", "abc123def45"]])
         client = FakeClient(sheet)
 
         updated, appended = spreadsheet.upsert_title_list_rows(
@@ -167,7 +167,26 @@ class SpreadsheetTests(unittest.TestCase):
         )
 
         self.assertEqual((updated, appended), (1, 0))
-        self.assertEqual(sheet.get("A2:C2")[0][0], "new")
+        self.assertEqual(sheet.get("A2:C2")[0], ["2026-04-19", "new", "abc123def45"])
+
+    def test_repair_title_list_schema_fixes_only_broken_rows(self):
+        sheet = FakeWorksheet()
+        sheet.update("A1:C4", [["タイトル", "日付", "URL"], ["broken title", "2026-04-02", "https://www.youtube.com/watch?v=abc123def45"], ["2026-04-03", "ok title", "zzz111yyy22"], ["broken 2", "2026-04-04", "https://youtu.be/mmm999nnn88"]])
+        sheet.update("F1:G3", [["key", "value"], ["refresh_cursor", "7"], ["updated_at", "2026-04-20T00:00:00Z"]])
+        client = FakeClient(sheet)
+
+        repaired = spreadsheet.repair_title_list_schema(
+            client=client,
+            spreadsheet_id="dummy",
+            worksheet_name="タイトルリスト",
+        )
+
+        self.assertEqual(repaired, 2)
+        self.assertEqual(sheet.get("A1:C1")[0], ["日付", "タイトル", "動画固有ID"])
+        self.assertEqual(sheet.get("A2:C2")[0], ["2026-04-02", "broken title", "abc123def45"])
+        self.assertEqual(sheet.get("A3:C3")[0], ["2026-04-03", "ok title", "zzz111yyy22"])
+        self.assertEqual(sheet.get("A4:C4")[0], ["2026-04-04", "broken 2", "mmm999nnn88"])
+        self.assertEqual(sheet.get("F1:G3"), [["key", "value"], ["refresh_cursor", "7"], ["updated_at", "2026-04-20T00:00:00Z"]])
 
 
 if __name__ == "__main__":
