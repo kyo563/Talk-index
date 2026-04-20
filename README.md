@@ -102,7 +102,7 @@ python -m http.server 8000
 - `upload_index_json_to_r2.yml`  
   毎日 `22:10 UTC`（`07:10 JST`）に `python exporter/sheet_to_json_and_upload_r2.py` を実行。
 - `cloudflare_build_contract.yml`  
-  push / pull request 時に `npm ci` → build 契約チェックを実行。
+  main への push と pull request 時に `npm ci` → build 契約チェックを実行。
 
 ### 主な Secrets（用途別）
 
