@@ -141,8 +141,9 @@ def build_aggregates(votes: list[dict[str, Any]], *, now_utc: datetime | None = 
     now_base = now_utc or datetime.now(UTC)
     jst_now = now_base + JST_OFFSET
     current_week_key = (jst_now - timedelta(days=jst_now.weekday())).strftime("%Y-%m-%d")
+    previous_week_key = (datetime.fromisoformat(current_week_key) - timedelta(days=7)).strftime("%Y-%m-%d")
 
-    weekly_items = sorted(weekly_counts.get(current_week_key, {}).values(), key=stable_sort_key)
+    weekly_items = sorted(weekly_counts.get(previous_week_key, {}).values(), key=stable_sort_key)
 
     base_payload = {
         "generatedAt": now_base.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -169,7 +170,7 @@ def build_aggregates(votes: list[dict[str, Any]], *, now_utc: datetime | None = 
         },
         "recent_recommendations": {
             **base_payload,
-            "weekKey": current_week_key,
+            "weekKey": previous_week_key,
             "items": weekly_items[:5],
         },
         "current_ranking": {

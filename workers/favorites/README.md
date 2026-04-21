@@ -22,6 +22,9 @@
 
 ## Notes
 
-- `headingId + clientId` は secret hash 化して deterministic key を作成します。
+- 集計で使う canonical 時刻は Worker サーバ受信時刻です（`payload.timestamp` は集計に使いません）。
+- `headingId + clientId` は secret hash 化して deterministic key を作成します（重複判定もこれのみ）。
+- hash 方式は `HMAC-SHA256(secret, "${scope}:${value}")` です。
+- `ipHash` / `uaHash` は保存のみで、重複判定には使いません。
 - raw `clientId` / raw IP は保存しません。
 - 集計正本は `favorites/unique/`、表示向けは `favorites/aggregates/` と `favorites/exports/` です。

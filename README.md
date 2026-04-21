@@ -149,7 +149,15 @@ python -m http.server 8000
 - 主判定: `headingId + clientId`
 - Worker側で `clientId` を secret hash 化し、`favorites/unique/.../<clientHash>.json` を**決定的キー**として保存
 - 同キーが既存なら duplicate/no-op を返し、集計を増やしません
+- `ipHash` / `uaHash` は保存のみで、重複判定には使いません
 - raw `clientId` / raw IP は保存しません（`clientHash`, optional `ipHash`, `uaHash` のみ）
+
+### favorites 時刻・ハッシュ規則
+
+- 集計正本の時刻（`firstVotedAt`, `weekKey`, `daily_snapshot`）は **サーバ受信時刻** を使います
+- `payload.timestamp` は集計に使わず、必要時のみ `clientTimestamp` として保持します
+- hash 方式は Python / Worker 共通で `HMAC-SHA256(secret, "${scope}:${value}")` です
+- `recent_recommendations` は「今週」ではなく **先週（月曜〜日曜）** を参照します
 
 ### フロント接続インターフェース
 
