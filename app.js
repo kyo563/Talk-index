@@ -9,6 +9,9 @@ const SEARCH_INDEX_URL_CANDIDATES = DATA_URL_CANDIDATES
 const TALKS_URL_CANDIDATES = DATA_URL_CANDIDATES
   .map((url) => String(url || "").replace(/latest\.json$/, "talks.json"))
   .filter((url, index, self) => url && self.indexOf(url) === index);
+const FAVORITES_BASE_URL_CANDIDATES = DATA_URL_CANDIDATES
+  .map((url) => String(url || "").replace(/\/index\/latest\.json$/, ""))
+  .filter((url, index, self) => url && self.indexOf(url) === index);
 
 const state = {
   search: "",
@@ -36,6 +39,14 @@ const state = {
   talkRecommendationCache: new Map(),
   talkSearchDocuments: null,
   lastFallbackTalkKey: "",
+  favoritesClientId: "",
+  favoritedHeadingIds: new Set(),
+  alreadyVotedHeadingIds: new Set(),
+  favoritePanelOpenKeys: new Set(),
+  favoritesRecent: null,
+  favoritesHall: null,
+  favoritesDataStatus: "idle",
+  favoritesDataError: "",
 };
 
 const RECOMMEND_LIMIT = 3;
@@ -86,9 +97,16 @@ const refs = {
   randomSection: document.getElementById("random-section"),
   tabVideo: document.getElementById("tab-video"),
   tabTalk: document.getElementById("tab-talk"),
+  tabFavorites: document.getElementById("tab-favorites"),
   topButton: document.getElementById("top-button"),
   bubbleLayer: document.getElementById("bubble-layer"),
   starLayer: document.getElementById("star-layer"),
+};
+
+const FAVORITES_STORAGE_KEYS = {
+  clientId: "talk_index:favorites:client_id",
+  favoriteIds: "talk_index:favorites:heading_ids",
+  votedIds: "talk_index:favorites:voted_heading_ids",
 };
 
 const AMBIENT_BUBBLE_COUNT = window.innerWidth < 700 ? 16 : 24;
@@ -105,6 +123,45 @@ const ambientScene = {
 
 function text(value) {
   return String(value || "").trim();
+}
+
+function toJsonArray(value) {
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeIdSet(values) {
+  return new Set((Array.isArray(values) ? values : []).map((v) => text(v)).filter(Boolean));
+}
+
+function saveFavoritesToStorage() {
+  localStorage.setItem(FAVORITES_STORAGE_KEYS.clientId, state.favoritesClientId);
+  localStorage.setItem(FAVORITES_STORAGE_KEYS.favoriteIds, JSON.stringify(Array.from(state.favoritedHeadingIds)));
+  localStorage.setItem(FAVORITES_STORAGE_KEYS.votedIds, JSON.stringify(Array.from(state.alreadyVotedHeadingIds)));
+}
+
+function ensureFavoritesClientId() {
+  if (state.favoritesClientId) return state.favoritesClientId;
+  const existing = text(localStorage.getItem(FAVORITES_STORAGE_KEYS.clientId));
+  if (existing) {
+    state.favoritesClientId = existing;
+    return existing;
+  }
+  const generated = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`).replace(/\s+/g, "");
+  state.favoritesClientId = generated;
+  return generated;
+}
+
+function restoreFavoritesFromStorage() {
+  state.favoritesClientId = text(localStorage.getItem(FAVORITES_STORAGE_KEYS.clientId));
+  state.favoritedHeadingIds = normalizeIdSet(toJsonArray(localStorage.getItem(FAVORITES_STORAGE_KEYS.favoriteIds)));
+  state.alreadyVotedHeadingIds = normalizeIdSet(toJsonArray(localStorage.getItem(FAVORITES_STORAGE_KEYS.votedIds)));
+  ensureFavoritesClientId();
+  saveFavoritesToStorage();
 }
 
 function normalizeTag(tag) {
@@ -1006,6 +1063,128 @@ function createFormattedAnchor(href, label) {
   return a;
 }
 
+function getHeadingIdFromObject(obj, fallback = "") {
+  return text(obj?.headingId || obj?.heading_id || obj?.id || obj?.key || fallback);
+}
+
+function findTalkByHeadingId(headingId) {
+  const normalized = text(headingId);
+  if (!normalized) return null;
+  return state.talks.find((talk) => getHeadingIdFromObject(talk, talk.name) === normalized)
+    || state.talks.find((talk) => text(talk.name) === normalized)
+    || null;
+}
+
+function isFavoritedHeading(headingId) {
+  return state.favoritedHeadingIds.has(text(headingId));
+}
+
+function createFavoriteButton(headingId, extraClass = "", onToggle = null) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `favorite-toggle${extraClass ? ` ${extraClass}` : ""}`;
+  const normalized = text(headingId);
+  const active = isFavoritedHeading(normalized);
+  button.textContent = active ? "★" : "☆";
+  button.setAttribute("aria-label", active ? "お気に入り解除" : "お気に入り登録");
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    if (onToggle) {
+      void onToggle(normalized);
+      return;
+    }
+    void toggleFavoriteHeading(normalized);
+  });
+  return button;
+}
+
+async function sendFavoriteVote(payload) {
+  let lastError = "";
+  for (const baseUrl of FAVORITES_BASE_URL_CANDIDATES) {
+    try {
+      const response = await fetch(`${text(baseUrl).replace(/\/$/, "")}/favorites/vote`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload || {}),
+      });
+      return response.json();
+    } catch (error) {
+      lastError = `${baseUrl}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  throw new Error(lastError || "favorites vote 送信に失敗しました");
+}
+
+async function fetchFavoritesAggregate(path) {
+  let lastError = "";
+  for (const baseUrl of FAVORITES_BASE_URL_CANDIDATES) {
+    try {
+      const response = await fetch(`${text(baseUrl).replace(/\/$/, "")}${path}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    } catch (error) {
+      lastError = `${baseUrl}${path}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  throw new Error(lastError || `${path} の取得に失敗しました`);
+}
+
+async function loadFavoritesDataIfNeeded() {
+  if (state.favoritesDataStatus === "ready") return;
+  if (state.favoritesDataStatus === "loading") return;
+  state.favoritesDataStatus = "loading";
+  state.favoritesDataError = "";
+  render();
+  try {
+    const [recent, hall] = await Promise.all([
+      fetchFavoritesAggregate("/favorites/recent_recommendations.json"),
+      fetchFavoritesAggregate("/favorites/hall_of_fame.json"),
+    ]);
+    state.favoritesRecent = recent;
+    state.favoritesHall = hall;
+    state.favoritesDataStatus = "ready";
+  } catch (error) {
+    state.favoritesDataError = error instanceof Error ? error.message : String(error);
+    state.favoritesDataStatus = "error";
+  }
+}
+
+async function toggleFavoriteHeading(headingId, sourceTalk = null) {
+  const normalized = text(headingId);
+  if (!normalized) return;
+  const alreadyFavorite = state.favoritedHeadingIds.has(normalized);
+  if (alreadyFavorite) {
+    state.favoritedHeadingIds.delete(normalized);
+    saveFavoritesToStorage();
+    render();
+    return;
+  }
+
+  state.favoritedHeadingIds.add(normalized);
+  saveFavoritesToStorage();
+  render();
+
+  if (state.alreadyVotedHeadingIds.has(normalized)) return;
+  state.alreadyVotedHeadingIds.add(normalized);
+  saveFavoritesToStorage();
+  const talk = sourceTalk || findTalkByHeadingId(normalized);
+  try {
+    await sendFavoriteVote({
+      headingId: normalized,
+      headingTitle: text(talk?.name || talk?.headingTitle || normalized),
+      videoId: text(talk?.videoId),
+      videoTitle: text(talk?.subsections?.[0]?.videoTitle || talk?.videoTitle),
+      sourceMode: state.viewMode,
+      clientId: ensureFavoritesClientId(),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    refs.notice.textContent = `お気に入り投票の送信に失敗しました（${error instanceof Error ? error.message : String(error)}）`;
+  }
+}
+
 function getFilteredVideos(search = parseSearch(state.search)) {
   return state.videos
     .filter((video) => hitVideo(video, search))
@@ -1040,21 +1219,30 @@ function updateToggleAllButton() {
     const videos = getFilteredVideos(search);
     total = videos.length;
     openCount = getDisplayedVideoOpenKeys(videos).size;
-  } else {
+  } else if (state.viewMode === "talk") {
     const talks = getFilteredTalks(search);
     total = talks.length;
     openCount = state.openTalkKeys.size;
+  } else {
+    refs.toggleAll.textContent = "全て展開";
+    refs.toggleAll.disabled = true;
+    return;
   }
+  refs.toggleAll.disabled = false;
   const allOpen = total > 0 && openCount === total;
   refs.toggleAll.textContent = allOpen ? "全て折り畳み" : "全て展開";
 }
 
 function updateTabs() {
   const isVideo = state.viewMode === "video";
+  const isTalk = state.viewMode === "talk";
+  const isFavorites = state.viewMode === "favorites";
   refs.tabVideo.classList.toggle("is-active", isVideo);
-  refs.tabTalk.classList.toggle("is-active", !isVideo);
+  refs.tabTalk.classList.toggle("is-active", isTalk);
+  refs.tabFavorites.classList.toggle("is-active", isFavorites);
   refs.tabVideo.setAttribute("aria-selected", isVideo ? "true" : "false");
-  refs.tabTalk.setAttribute("aria-selected", isVideo ? "false" : "true");
+  refs.tabTalk.setAttribute("aria-selected", isTalk ? "true" : "false");
+  refs.tabFavorites.setAttribute("aria-selected", isFavorites ? "true" : "false");
 }
 
 function updateServerStatus(mode, shownCount = 0) {
@@ -1276,7 +1464,10 @@ function renderCards(videos) {
           ? createFormattedAnchor(sec.sectionUrl, sec.name)
           : createFormattedSpan(sec.name);
         label.classList.add("section-link");
-        head.append(toggle, label);
+        const headingId = getHeadingIdFromObject(sec, sec.name);
+        const sourceTalk = findTalkByHeadingId(headingId);
+        const favoriteButton = createFavoriteButton(headingId, "favorite-toggle--section", (id) => toggleFavoriteHeading(id, sourceTalk));
+        head.append(toggle, label, favoriteButton);
 
         const subList = document.createElement("ul");
         subList.className = "sub-list";
@@ -1347,10 +1538,17 @@ function renderCards(videos) {
   });
 }
 
-function renderTalkCards(talks) {
+function renderTalkCards(talks, options = {}) {
   if (!talks.length) return renderNoResult();
 
-  refs.results.innerHTML = "";
+  const {
+    appendToResults = true,
+    showRecommendations = true,
+    showFavoriteButton = true,
+  } = options;
+
+  if (appendToResults) refs.results.innerHTML = "";
+  const container = appendToResults ? refs.results : document.createElement("div");
 
   talks.forEach((talk) => {
     const card = document.createElement("article");
@@ -1367,10 +1565,17 @@ function renderTalkCards(talks) {
 
     const titleRow = document.createElement("div");
     titleRow.className = "card-title-row";
+    const titleLabel = document.createElement("span");
     if (talk.sectionUrl && isValidHttpUrl(talk.sectionUrl)) {
-      titleRow.appendChild(createFormattedAnchor(talk.sectionUrl, talk.name));
+      titleLabel.appendChild(createFormattedAnchor(talk.sectionUrl, talk.name));
     } else {
-      titleRow.appendChild(createFormattedSpan(talk.name));
+      titleLabel.appendChild(createFormattedSpan(talk.name));
+    }
+    titleRow.appendChild(titleLabel);
+    if (showFavoriteButton) {
+      titleRow.appendChild(
+        createFavoriteButton(getHeadingIdFromObject(talk, talk.name), "favorite-toggle--row", (id) => toggleFavoriteHeading(id, talk)),
+      );
     }
 
     const metaRow = document.createElement("div");
@@ -1410,7 +1615,7 @@ function renderTalkCards(talks) {
     }
 
     detail.appendChild(subList);
-    if (state.openTalkKeys.has(talk.key)) {
+    if (showRecommendations && state.openTalkKeys.has(talk.key)) {
       const recommendations = buildTalkRecommendationsForTalk(talk);
       detail.appendChild(createRecommendationBlock(recommendations, "talk"));
     }
@@ -1426,14 +1631,91 @@ function renderTalkCards(talks) {
     });
 
     card.append(summary, detail);
-    refs.results.appendChild(card);
+    container.appendChild(card);
   });
+
+  return container;
+}
+
+function createFavoritePanel(title, key, talks, meta = "") {
+  const wrap = document.createElement("article");
+  wrap.className = "favorite-panel";
+
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "favorite-panel-head";
+  const isOpen = state.favoritePanelOpenKeys.has(key);
+  head.setAttribute("aria-expanded", isOpen ? "true" : "false");
+
+  const titleEl = document.createElement("span");
+  titleEl.className = "favorite-panel-title";
+  titleEl.textContent = title;
+  const metaEl = document.createElement("span");
+  metaEl.className = "favorite-panel-meta";
+  metaEl.textContent = meta || `${talks.length}件`;
+  const marker = document.createElement("span");
+  marker.className = "favorite-panel-marker";
+  marker.textContent = isOpen ? "▼" : "▶";
+  head.append(titleEl, metaEl, marker);
+
+  const body = document.createElement("div");
+  body.className = "favorite-panel-body";
+  if (isOpen) {
+    if (talks.length) {
+      body.appendChild(renderTalkCards(talks, { appendToResults: false, showRecommendations: false, showFavoriteButton: true }));
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "favorite-panel-empty";
+      empty.textContent = "データがありません";
+      body.appendChild(empty);
+    }
+  }
+
+  head.addEventListener("click", () => {
+    if (state.favoritePanelOpenKeys.has(key)) state.favoritePanelOpenKeys.delete(key);
+    else state.favoritePanelOpenKeys.add(key);
+    render();
+  });
+
+  wrap.append(head, body);
+  return wrap;
+}
+
+function renderFavoritesTab() {
+  refs.results.innerHTML = "";
+  const favoriteTalks = Array.from(state.favoritedHeadingIds)
+    .map((headingId) => findTalkByHeadingId(headingId))
+    .filter(Boolean);
+
+  const recentItems = Array.isArray(state.favoritesRecent?.items) ? state.favoritesRecent.items : [];
+  const hallItems = Array.isArray(state.favoritesHall?.items) ? state.favoritesHall.items : [];
+  const recentTalks = recentItems.map((item) => findTalkByHeadingId(getHeadingIdFromObject(item))).filter(Boolean);
+  const hallTalks = hallItems.map((item) => findTalkByHeadingId(getHeadingIdFromObject(item))).filter(Boolean);
+
+  const favoriteMeta = favoriteTalks.length ? `${favoriteTalks.length}件` : "0件";
+  refs.results.appendChild(createFavoritePanel("お気に入りリスト", "mine", favoriteTalks, favoriteMeta));
+
+  const recentMeta = state.favoritesDataStatus === "ready"
+    ? `先週 ${state.favoritesRecent?.weekKey || ""}`.trim()
+    : state.favoritesDataStatus === "loading" ? "読込中…" : state.favoritesDataStatus === "error" ? "取得失敗" : "未取得";
+  refs.results.appendChild(createFavoritePanel("最近のおすすめ", "recent", recentTalks, recentMeta));
+
+  const hallMeta = state.favoritesDataStatus === "ready" ? "累計上位" : state.favoritesDataStatus === "loading" ? "読込中…" : state.favoritesDataStatus === "error" ? "取得失敗" : "未取得";
+  refs.results.appendChild(createFavoritePanel("殿堂入り", "hall", hallTalks, hallMeta));
+
+  if (state.favoritesDataStatus === "error") {
+    const note = document.createElement("p");
+    note.className = "favorite-panel-empty";
+    note.textContent = `集計の取得に失敗しました: ${state.favoritesDataError}`;
+    refs.results.appendChild(note);
+  }
 }
 
 function render() {
   const search = parseSearch(state.search);
   const isVideo = state.viewMode === "video";
-  if (!isVideo && state.talksStatus === "loading") {
+  const isTalkLike = state.viewMode === "talk" || state.viewMode === "favorites";
+  if (isTalkLike && state.talksStatus === "loading") {
     refs.notice.textContent = "トークを読込中…";
     refs.results.innerHTML = "<p>トークを読込中…</p>";
     updateTabs();
@@ -1441,7 +1723,7 @@ function render() {
     updateToggleAllButton();
     return;
   }
-  if (!isVideo && state.talksStatus === "error") {
+  if (isTalkLike && state.talksStatus === "error") {
     refs.notice.textContent = state.talksError || "talks.json の読込に失敗しました";
     refs.results.innerHTML = "<p>トークデータの読込に失敗しました</p>";
     updateTabs();
@@ -1454,12 +1736,14 @@ function render() {
   refs.notice.textContent = "";
 
   updateTabs();
-  updateServerStatus("ok", filtered.length);
+  updateServerStatus("ok", state.viewMode === "favorites" ? state.favoritedHeadingIds.size : filtered.length);
   updateToggleAllButton();
   if (isVideo) {
     renderCards(filtered);
-  } else {
+  } else if (state.viewMode === "talk") {
     renderTalkCards(filtered);
+  } else {
+    renderFavoritesTab();
   }
 
   window.requestAnimationFrame(() => {
@@ -1684,14 +1968,18 @@ function toggleAllByMode() {
     state.videoAutoCollapseAnchor = null;
     return;
   }
+  if (state.viewMode === "favorites") return;
 
   const allOpen = state.talks.length > 0 && state.openTalkKeys.size === state.talks.length;
   state.openTalkKeys = allOpen ? new Set() : new Set(state.talks.map((talk) => talk.key));
 }
 
 async function switchViewMode(mode) {
-  if (mode === "talk") {
+  if (mode === "talk" || mode === "favorites") {
     await loadTalksIfNeeded();
+    if (mode === "favorites") {
+      await loadFavoritesDataIfNeeded();
+    }
     state.isVideoExpandLock = false;
     state.videoAutoCollapseAnchor = null;
   }
@@ -1844,6 +2132,9 @@ async function init() {
   refs.tabTalk.addEventListener("click", () => {
     void switchViewMode("talk");
   });
+  refs.tabFavorites.addEventListener("click", () => {
+    void switchViewMode("favorites");
+  });
 
   refs.topButton.addEventListener("click", () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1869,6 +2160,7 @@ async function init() {
   updateNewVideoHighlightVisibility();
   bindAmbientReactions();
   bindMobileScrollLock();
+  restoreFavoritesFromStorage();
 
   try {
     state.videos = await fetchInitialVideos();
