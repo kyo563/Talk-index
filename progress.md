@@ -238,3 +238,11 @@
   - 殿堂入り
 - 最近のおすすめ／殿堂入りは Worker/R2 の集計 JSON を読んで表示。
 - 3カードの詳細表示は既存の大見出しカードUI（▶展開・小見出し・元動画タイトル1行）を再利用。
+
+## 2026-04 favorites transport hardening（#105 次段）
+
+- #105 の favorites MVP UI（タブ追加 / localStorage / ☆★ / 3カード）は導入済み。
+- READ/WRITE のURL解決を分離（aggregate JSON と vote API を別ホストで運用可能化）。
+- `alreadyVotedHeadingIds` は `POST /favorites/vote` 成功時（2xx or duplicate 409）のみ確定。
+- 通信失敗時は `unsyncedFavoriteHeadingIds` として保持し、再送可能な状態を維持。
+- 未同期票の再送トリガーを追加（起動時 / お気に入りタブ遷移時 / 再お気に入り時）。

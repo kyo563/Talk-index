@@ -12,6 +12,18 @@ const TALKS_URL_CANDIDATES = DATA_URL_CANDIDATES
 const FAVORITES_BASE_URL_CANDIDATES = DATA_URL_CANDIDATES
   .map((url) => String(url || "").replace(/\/index\/latest\.json$/, ""))
   .filter((url, index, self) => url && self.indexOf(url) === index);
+const FAVORITES_READ_BASE_URL_CANDIDATES = [
+  text(window.__TALK_INDEX_FAVORITES_READ_BASE_URL__),
+  text(window.__TALK_INDEX_FAVORITES_BASE_URL__),
+  ...FAVORITES_BASE_URL_CANDIDATES,
+  text(location.origin),
+].filter((url, index, self) => url && self.indexOf(url) === index);
+const FAVORITES_WRITE_BASE_URL_CANDIDATES = [
+  text(window.__TALK_INDEX_FAVORITES_WRITE_BASE_URL__),
+  text(window.__TALK_INDEX_FAVORITES_API_BASE_URL__),
+  text(window.__TALK_INDEX_FAVORITES_BASE_URL__),
+  text(location.origin),
+].filter((url, index, self) => url && self.indexOf(url) === index);
 
 const state = {
   search: "",
@@ -42,6 +54,7 @@ const state = {
   favoritesClientId: "",
   favoritedHeadingIds: new Set(),
   alreadyVotedHeadingIds: new Set(),
+  unsyncedFavoriteHeadingIds: new Set(),
   favoritePanelOpenKeys: new Set(),
   favoritesRecent: null,
   favoritesHall: null,
@@ -107,6 +120,7 @@ const FAVORITES_STORAGE_KEYS = {
   clientId: "talk_index:favorites:client_id",
   favoriteIds: "talk_index:favorites:heading_ids",
   votedIds: "talk_index:favorites:voted_heading_ids",
+  unsyncedIds: "talk_index:favorites:unsynced_heading_ids",
 };
 
 const AMBIENT_BUBBLE_COUNT = window.innerWidth < 700 ? 16 : 24;
@@ -142,6 +156,7 @@ function saveFavoritesToStorage() {
   localStorage.setItem(FAVORITES_STORAGE_KEYS.clientId, state.favoritesClientId);
   localStorage.setItem(FAVORITES_STORAGE_KEYS.favoriteIds, JSON.stringify(Array.from(state.favoritedHeadingIds)));
   localStorage.setItem(FAVORITES_STORAGE_KEYS.votedIds, JSON.stringify(Array.from(state.alreadyVotedHeadingIds)));
+  localStorage.setItem(FAVORITES_STORAGE_KEYS.unsyncedIds, JSON.stringify(Array.from(state.unsyncedFavoriteHeadingIds)));
 }
 
 function ensureFavoritesClientId() {
@@ -160,7 +175,11 @@ function restoreFavoritesFromStorage() {
   state.favoritesClientId = text(localStorage.getItem(FAVORITES_STORAGE_KEYS.clientId));
   state.favoritedHeadingIds = normalizeIdSet(toJsonArray(localStorage.getItem(FAVORITES_STORAGE_KEYS.favoriteIds)));
   state.alreadyVotedHeadingIds = normalizeIdSet(toJsonArray(localStorage.getItem(FAVORITES_STORAGE_KEYS.votedIds)));
+  state.unsyncedFavoriteHeadingIds = normalizeIdSet(toJsonArray(localStorage.getItem(FAVORITES_STORAGE_KEYS.unsyncedIds)));
   ensureFavoritesClientId();
+  state.unsyncedFavoriteHeadingIds.forEach((headingId) => {
+    if (state.alreadyVotedHeadingIds.has(headingId)) state.unsyncedFavoriteHeadingIds.delete(headingId);
+  });
   saveFavoritesToStorage();
 }
 
@@ -1102,14 +1121,23 @@ function createFavoriteButton(headingId, extraClass = "", onToggle = null) {
 
 async function sendFavoriteVote(payload) {
   let lastError = "";
-  for (const baseUrl of FAVORITES_BASE_URL_CANDIDATES) {
+  for (const baseUrl of FAVORITES_WRITE_BASE_URL_CANDIDATES) {
     try {
       const response = await fetch(`${text(baseUrl).replace(/\/$/, "")}/favorites/vote`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload || {}),
       });
-      return response.json();
+      const isJson = (response.headers.get("content-type") || "").toLowerCase().includes("application/json");
+      const body = isJson ? await response.json().catch(() => null) : null;
+      const duplicate = response.status === 409
+        || body?.code === "duplicate"
+        || body?.status === "duplicate"
+        || body?.duplicate === true;
+      if (response.ok || duplicate) {
+        return { ok: true, duplicate, status: response.status, body, baseUrl };
+      }
+      lastError = `${baseUrl}: HTTP ${response.status}`;
     } catch (error) {
       lastError = `${baseUrl}: ${error instanceof Error ? error.message : String(error)}`;
     }
@@ -1119,7 +1147,7 @@ async function sendFavoriteVote(payload) {
 
 async function fetchFavoritesAggregate(path) {
   let lastError = "";
-  for (const baseUrl of FAVORITES_BASE_URL_CANDIDATES) {
+  for (const baseUrl of FAVORITES_READ_BASE_URL_CANDIDATES) {
     try {
       const response = await fetch(`${text(baseUrl).replace(/\/$/, "")}${path}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1129,6 +1157,48 @@ async function fetchFavoritesAggregate(path) {
     }
   }
   throw new Error(lastError || `${path} の取得に失敗しました`);
+}
+
+async function syncFavoriteVote(headingId, sourceTalk = null) {
+  const normalized = text(headingId);
+  if (!normalized || !state.favoritedHeadingIds.has(normalized)) return false;
+  if (state.alreadyVotedHeadingIds.has(normalized)) {
+    state.unsyncedFavoriteHeadingIds.delete(normalized);
+    saveFavoritesToStorage();
+    return true;
+  }
+  const talk = sourceTalk || findTalkByHeadingId(normalized);
+  try {
+    await sendFavoriteVote({
+      headingId: normalized,
+      headingTitle: text(talk?.name || talk?.headingTitle || normalized),
+      videoId: text(talk?.videoId),
+      videoTitle: text(talk?.subsections?.[0]?.videoTitle || talk?.videoTitle),
+      sourceMode: state.viewMode,
+      clientId: ensureFavoritesClientId(),
+      timestamp: new Date().toISOString(),
+    });
+    state.alreadyVotedHeadingIds.add(normalized);
+    state.unsyncedFavoriteHeadingIds.delete(normalized);
+    saveFavoritesToStorage();
+    if (state.unsyncedFavoriteHeadingIds.size === 0 && refs.notice.textContent.includes("投票は未同期")) {
+      refs.notice.textContent = "";
+    }
+    return true;
+  } catch (error) {
+    state.unsyncedFavoriteHeadingIds.add(normalized);
+    saveFavoritesToStorage();
+    refs.notice.textContent = `お気に入りは保存済みです（投票は未同期: ${error instanceof Error ? error.message : String(error)}）`;
+    return false;
+  }
+}
+
+async function retryUnsyncedFavoriteVotes() {
+  const targets = Array.from(state.unsyncedFavoriteHeadingIds).filter((headingId) => state.favoritedHeadingIds.has(headingId));
+  if (targets.length === 0) return;
+  for (const headingId of targets) {
+    await syncFavoriteVote(headingId);
+  }
 }
 
 async function loadFavoritesDataIfNeeded() {
@@ -1163,26 +1233,10 @@ async function toggleFavoriteHeading(headingId, sourceTalk = null) {
   }
 
   state.favoritedHeadingIds.add(normalized);
+  state.unsyncedFavoriteHeadingIds.add(normalized);
   saveFavoritesToStorage();
   render();
-
-  if (state.alreadyVotedHeadingIds.has(normalized)) return;
-  state.alreadyVotedHeadingIds.add(normalized);
-  saveFavoritesToStorage();
-  const talk = sourceTalk || findTalkByHeadingId(normalized);
-  try {
-    await sendFavoriteVote({
-      headingId: normalized,
-      headingTitle: text(talk?.name || talk?.headingTitle || normalized),
-      videoId: text(talk?.videoId),
-      videoTitle: text(talk?.subsections?.[0]?.videoTitle || talk?.videoTitle),
-      sourceMode: state.viewMode,
-      clientId: ensureFavoritesClientId(),
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    refs.notice.textContent = `お気に入り投票の送信に失敗しました（${error instanceof Error ? error.message : String(error)}）`;
-  }
+  await syncFavoriteVote(normalized, sourceTalk);
 }
 
 function getFilteredVideos(search = parseSearch(state.search)) {
@@ -1978,6 +2032,7 @@ async function switchViewMode(mode) {
   if (mode === "talk" || mode === "favorites") {
     await loadTalksIfNeeded();
     if (mode === "favorites") {
+      await retryUnsyncedFavoriteVotes();
       await loadFavoritesDataIfNeeded();
     }
     state.isVideoExpandLock = false;
@@ -2161,6 +2216,7 @@ async function init() {
   bindAmbientReactions();
   bindMobileScrollLock();
   restoreFavoritesFromStorage();
+  await retryUnsyncedFavoriteVotes();
 
   try {
     state.videos = await fetchInitialVideos();
