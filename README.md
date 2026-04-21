@@ -168,6 +168,23 @@ python -m http.server 8000
 - `fetchRecentRecommendations(baseUrl)`
 - `fetchFavoriteRanking(baseUrl)`
 
+### フロントUI（MVP）
+
+- タブ: `動画単位 / トーク単位 / お気に入り`
+- ☆/★トグル: 大見出し行の右端に配置（即時反映）
+- localStorage 保存:
+  - `talk_index:favorites:client_id`
+  - `talk_index:favorites:heading_ids`
+  - `talk_index:favorites:voted_heading_ids`
+- vote送信ルール:
+  - 同一端末で同一 heading を初回お気に入りした時だけ `POST /favorites/vote` を送信
+  - 解除時は vote 取消APIは呼ばない
+  - 再度お気に入りしても再送しない
+- お気に入りタブの3カード:
+  - お気に入りリスト（localStorage基準）
+  - 最近のおすすめ（`/favorites/recent_recommendations.json`）
+  - 殿堂入り（`/favorites/hall_of_fame.json`）
+
 ### Workerで必要な環境変数
 
 - `FAVORITES_HASH_SECRET`
