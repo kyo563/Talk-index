@@ -908,42 +908,38 @@ function createAnchor(href, label) {
   a.href = href;
   a.target = "_blank";
   a.rel = "noopener noreferrer";
-  a.textContent = label;
+  a.appendChild(renderPlainText(label));
   return a;
 }
 
-function buildFormattedFragment(raw) {
+function renderPlainText(raw) {
+  return document.createTextNode(String(raw ?? ""));
+}
+
+function renderInlineMarkup(raw, { enableMarkup = true } = {}) {
   const fragment = document.createDocumentFragment();
-  const value = String(raw || "");
-  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|--[^-]+--|-[^-]+-)/g;
+  const value = String(raw ?? "");
+  if (!enableMarkup || !value) {
+    fragment.appendChild(renderPlainText(value));
+    return fragment;
+  }
+
+  const pattern = /(?:\*\*[^*\n]+\*\*|--(?:[^\n-]|-(?!-))+--)/g;
   let lastIndex = 0;
 
-  value.replace(pattern, (matched, _unused, offset) => {
+  value.replace(pattern, (matched, offset) => {
     if (offset > lastIndex) {
-      fragment.appendChild(document.createTextNode(value.slice(lastIndex, offset)));
+      fragment.appendChild(renderPlainText(value.slice(lastIndex, offset)));
     }
 
-    let content = matched;
-    let node = document.createTextNode(content);
+    let node = renderPlainText(matched);
     if (matched.startsWith("**") && matched.endsWith("**")) {
-      content = matched.slice(2, -2);
       const strong = document.createElement("strong");
-      strong.appendChild(document.createTextNode(content));
-      node = strong;
-    } else if (matched.startsWith("*") && matched.endsWith("*")) {
-      content = matched.slice(1, -1);
-      const strong = document.createElement("strong");
-      strong.appendChild(document.createTextNode(content));
+      strong.appendChild(renderPlainText(matched.slice(2, -2)));
       node = strong;
     } else if (matched.startsWith("--") && matched.endsWith("--")) {
-      content = matched.slice(2, -2);
       const s = document.createElement("s");
-      s.appendChild(document.createTextNode(content));
-      node = s;
-    } else if (matched.startsWith("-") && matched.endsWith("-")) {
-      content = matched.slice(1, -1);
-      const s = document.createElement("s");
-      s.appendChild(document.createTextNode(content));
+      s.appendChild(renderPlainText(matched.slice(2, -2)));
       node = s;
     }
 
@@ -953,10 +949,14 @@ function buildFormattedFragment(raw) {
   });
 
   if (lastIndex < value.length) {
-    fragment.appendChild(document.createTextNode(value.slice(lastIndex)));
+    fragment.appendChild(renderPlainText(value.slice(lastIndex)));
   }
 
   return fragment;
+}
+
+function buildFormattedFragment(raw) {
+  return renderInlineMarkup(raw, { enableMarkup: true });
 }
 
 
@@ -1557,7 +1557,7 @@ function renderCards(videos) {
     if (isValidHttpUrl(video.url)) {
       titleRow.appendChild(createAnchor(video.url, video.title));
     } else {
-      titleRow.textContent = video.title;
+      titleRow.appendChild(renderPlainText(video.title));
     }
 
     const metaRow = document.createElement("div");
@@ -1579,7 +1579,7 @@ function renderCards(videos) {
 
     const dateCorner = document.createElement("div");
     dateCorner.className = "card-date-corner";
-    dateCorner.textContent = video.date || "日付なし";
+    dateCorner.appendChild(renderPlainText(video.date || "日付なし"));
 
     side.append(thumb, dateCorner);
     summary.append(main, side);
