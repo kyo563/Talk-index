@@ -204,7 +204,7 @@
 - MVPでは、★を「保存UI」と「軽い参加シグナル送信」を兼ねる入口として扱う。  
 - 重複制御は `headingId + clientId` を主判定、IPは異常連投抑止の補助に限定する。  
 - ★の見た目変更とお気に入り一覧更新は、ローカル状態先行で即時反映を基本にする。  
-- 集計正本はR2、スプレッドシートは日次同期ミラーにする。  
+- 集計正本はR2、スプレッドシートは日次同期を基本とする管理用ミラーとし、必要に応じて手動実行も可能とする。  
 - お気に入りタブは「お気に入りリスト／最近のおすすめ／殿堂入り」の3カード構成を基本とする。  
 - 詳細表示は既存の大見出し展開体験を踏襲し、学習コストを増やさない。
 
@@ -260,7 +260,7 @@
   - `favorites_recent_recommendations`
   - `favorites_daily_snapshots`
 - `favorites_daily_snapshots` は `snapshotDate + headingId` で upsert（履歴維持、同日再実行は上書き）。
-- `sourceVideoTitle` は次優先で決定する：`direct.sourceVideoTitle` を最優先、次に aggregate の `videoTitle`、欠損時は `index/talks.json` から復元。
+- `sourceVideoTitle` は次優先で決定する：直接値の `sourceVideoTitle` を最優先、次に aggregate の `videoTitle`、欠損時は `index/talks.json` から復元。
 - `index/talks.json` 復元時は `videoId` 一致を優先し、`videoId` が使えない場合のみ heading 単独候補が一意なら採用。候補が複数で曖昧な場合は誤復元を避けるため空欄にする。
 - favorites 用シートは、ヘッダ列数不足を避けるため必要列数を明示確保する実装に更新済み。
 
