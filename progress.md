@@ -246,3 +246,27 @@
 - `alreadyVotedHeadingIds` は `POST /favorites/vote` 成功時（2xx or duplicate 409）のみ確定。
 - 通信失敗時は `unsyncedFavoriteHeadingIds` として保持し、再送可能な状態を維持。
 - 未同期票の再送トリガーを追加（起動時 / お気に入りタブ遷移時 / 再お気に入り時）。
+
+## 2026-04 favorites R2→Spreadsheet ミラーリング実装
+
+- 追加: `exporter/favorites_r2_to_sheet.py`（R2集計JSONをSpreadsheetへ同期）。
+- 追加: `crawler/services/favorites_mirror.py`（シート名/列名定数、全置換、daily upsert）。
+- 追加: `.github/workflows/favorites_r2_to_sheet.yml`（手動 + 日次実行）。
+- 追加シート:
+  - `favorites_current_ranking`
+  - `favorites_hall_of_fame`
+  - `favorites_recent_recommendations`
+  - `favorites_daily_snapshots`
+- `favorites_daily_snapshots` は `snapshotDate + headingId` で upsert（履歴維持、同日再実行は上書き）。
+- `sourceVideoTitle` は aggregate の `videoTitle` を優先し、欠損時は `index/talks.json` から復元を試行。
+
+### 未完了項目
+
+- `daily_snapshot/latest.json` を常に生成する運用への統一（現状は日付ファイル群フォールバックあり）。
+- `sourceVideoTitle` 復元率の可視化（どの程度空欄が出るかの計測）。
+
+### 次候補
+
+- UIに総投票数カードを追加。
+- お気に入り集計カードの説明文・期間表示を改善。
+- duplicate レスポンス仕様（HTTPステータス/ボディ）を固定化して明文化。

@@ -188,6 +188,35 @@ python -m http.server 8000
   - 最近のおすすめ（`/favorites/recent_recommendations.json`）
   - 殿堂入り（`/favorites/hall_of_fame.json`）
 
+
+### favorites ミラー同期（R2 → Spreadsheet）
+
+- favorites の**正本は引き続き R2 / Worker** です。
+- スプレッドシートは管理者向けの**参照ミラー**です（正本にしません）。
+- 同期ジョブ: `python exporter/favorites_r2_to_sheet.py`
+- 同期元JSON:
+  - `favorites/exports/current_ranking.json`
+  - `favorites/aggregates/hall_of_fame.json`
+  - `favorites/aggregates/recent_recommendations.json`
+  - `favorites/exports/daily_snapshot/latest.json` または `favorites/exports/daily_snapshot/YYYY-MM-DD.json`
+
+#### 反映先シート
+
+- `favorites_current_ranking`（毎回全置換）
+- `favorites_hall_of_fame`（毎回全置換、上位3件）
+- `favorites_recent_recommendations`（毎回全置換、先週の上位5件）
+- `favorites_daily_snapshots`（`snapshotDate + headingId` をキーに upsert / 履歴保持）
+
+#### 列
+
+- 必須: `snapshotDate`, `weekKey`, `headingId`, `headingText`, `videoId`, `sourceVideoTitle`, `voteCount`, `rank`, `firstVotedAt`, `lastVotedAt`, `aggregateType`
+- 追加: `generatedAt`, `sourceJsonUrl`, `note`
+
+#### 実行方法
+
+- 手動: GitHub Actions `Mirror favorites aggregates to Spreadsheet` を `workflow_dispatch` で実行
+- 日次: 同ワークフローの `schedule`（毎日 09:00 UTC / 18:00 JST）
+
 ### favorites READ/WRITE URL 設定
 
 - favorites は READ（aggregate JSON 取得）と WRITE（vote API送信）を分離可能です。
