@@ -76,18 +76,23 @@ class TimestampTests(unittest.TestCase):
         )
         self.assertEqual([row[0] for row in rows], ["トークA", "トークB", "トークC"])
 
-    def test_duplicate_same_label_keeps_top(self):
+    def test_same_label_far_apart_can_coexist(self):
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
-            description="10:08 雑談パート",
+            description="",
             timestamp_sources=[
-                TimestampSource(source_type="top", text="10:00 雑談パート"),
-                TimestampSource(source_type="reply", text="10:05 雑談パート"),
+                TimestampSource(source_type="top", text="05:00 雑談"),
+                TimestampSource(source_type="reply", text="45:00 雑談"),
             ],
         )
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][0], "雑談パート")
-        self.assertEqual(rows[0][1], "https://www.youtube.com/watch?v=abc123def45&t=600s")
+        self.assertEqual([row[0] for row in rows], ["雑談", "雑談"])
+        self.assertEqual(
+            [row[1] for row in rows],
+            [
+                "https://www.youtube.com/watch?v=abc123def45&t=300s",
+                "https://www.youtube.com/watch?v=abc123def45&t=2700s",
+            ],
+        )
 
     def test_duplicate_within_ten_seconds_keeps_top(self):
         rows = build_timestamp_rows(
@@ -101,6 +106,27 @@ class TimestampTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], "本題")
         self.assertEqual(rows[0][1], "https://www.youtube.com/watch?v=abc123def45&t=1200s")
+
+    def test_duplicate_at_exactly_ten_seconds_keeps_top(self):
+        rows = build_timestamp_rows(
+            video_url="https://www.youtube.com/watch?v=abc123def45",
+            timestamp_sources=[
+                TimestampSource(source_type="top", text="20:00 本題"),
+                TimestampSource(source_type="reply", text="20:10 補足"),
+            ],
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "本題")
+        self.assertEqual(rows[0][1], "https://www.youtube.com/watch?v=abc123def45&t=1200s")
+
+    def test_same_source_within_ten_seconds_can_coexist(self):
+        rows = build_timestamp_rows(
+            video_url="https://www.youtube.com/watch?v=abc123def45",
+            timestamp_sources=[
+                TimestampSource(source_type="top", text="10:00 話題A\n10:06 話題B"),
+            ],
+        )
+        self.assertEqual([row[0] for row in rows], ["話題A", "話題B"])
 
     def test_over_ten_seconds_can_coexist(self):
         rows = build_timestamp_rows(

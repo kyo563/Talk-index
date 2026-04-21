@@ -273,12 +273,6 @@ def _is_duplicate_candidate(entry: ParsedTimestampEntry, existing: ParsedTimesta
     if entry.source_type == existing.source_type:
         return False
 
-    normalized_entry = _normalize_dedup_label(entry.label)
-    normalized_existing = _normalize_dedup_label(existing.label)
-
-    if normalized_entry and normalized_existing and normalized_entry == normalized_existing:
-        return True
-
     if abs(entry.seconds - existing.seconds) <= 10:
         return True
 
