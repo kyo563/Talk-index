@@ -1,0 +1,42 @@
+name: sync_favorites_mirror
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "35 0 * * *"
+
+jobs:
+  sync-favorites-mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run favorites mirror tests
+        env:
+          PYTHONPATH: .
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Sync favorites mirror to spreadsheet
+        env:
+          PYTHONPATH: .
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FAVORITES_MIRROR_SPREADSHEET_ID: ${{ secrets.FAVORITES_MIRROR_SPREADSHEET_ID }}
+          FAVORITES_PUBLIC_BASE_URL: ${{ secrets.FAVORITES_PUBLIC_BASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: python -m crawler.jobs.sync_favorites_mirror_to_sheet
