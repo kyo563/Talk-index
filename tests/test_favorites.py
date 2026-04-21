@@ -45,14 +45,40 @@ class FavoritesTests(unittest.TestCase):
                 "firstVotedAt": "2026-04-20T03:00:00Z",
                 "weekKey": "2026-04-20",
             },
+            {
+                "headingId": "h1",
+                "clientHash": "c4",
+                "videoId": "v1",
+                "headingTitle": "見出し1",
+                "videoTitle": "動画1",
+                "firstVotedAt": "2026-04-14T04:00:00Z",
+                "weekKey": "2026-04-13",
+            },
+            {
+                "headingId": "h1",
+                "clientHash": "c5",
+                "videoId": "v1",
+                "headingTitle": "見出し1",
+                "videoTitle": "動画1",
+                "firstVotedAt": "2026-04-19T04:00:00Z",
+                "weekKey": "2026-04-13",
+            },
         ]
 
         aggregates = build_aggregates(votes, now_utc=datetime(2026, 4, 21, tzinfo=UTC))
+        previous_week = aggregates["recent_recommendations"]
+        weekly_0413 = aggregates["weekly"]["2026-04-13"]["items"][0]
+        weekly_0420 = aggregates["weekly"]["2026-04-20"]["items"][0]
 
         self.assertEqual(aggregates["hall_of_fame"]["items"][0]["headingId"], "h1")
-        self.assertEqual(aggregates["hall_of_fame"]["items"][0]["voteCount"], 2)
-        self.assertEqual(len(aggregates["recent_recommendations"]["items"]), 2)
+        self.assertEqual(aggregates["hall_of_fame"]["items"][0]["voteCount"], 4)
+        self.assertEqual(previous_week["weekKey"], "2026-04-13")
+        self.assertEqual(len(previous_week["items"]), 1)
         self.assertEqual(aggregates["daily_snapshot"]["snapshotDate"], "2026-04-21")
+        self.assertEqual(weekly_0413["firstVotedAt"], "2026-04-14T04:00:00Z")
+        self.assertEqual(weekly_0413["lastVotedAt"], "2026-04-19T04:00:00Z")
+        self.assertEqual(weekly_0420["firstVotedAt"], "2026-04-20T01:00:00Z")
+        self.assertEqual(weekly_0420["lastVotedAt"], "2026-04-20T02:00:00Z")
 
 
 if __name__ == "__main__":

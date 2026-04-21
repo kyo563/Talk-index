@@ -7,9 +7,56 @@ function text(value) {
   return String(value || "").trim();
 }
 
-async function sha256Hex(input) {
-  const bytes = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+function utf8(input) {
+  return new TextEncoder().encode(input);
+}
+
+function canonicalServerTimestamp(now = new Date()) {
+  return now.toISOString();
+}
+
+function jstDateFromIso(iso) {
+  const raw = text(iso);
+  const date = new Date(raw || Date.now());
+  const jstMs = date.getTime() + 9 * 60 * 60 * 1000;
+  return new Date(jstMs).toISOString().slice(0, 10);
+}
+
+function weekKeyJstFromIso(iso) {
+  const date = new Date(`${jstDateFromIso(iso)}T00:00:00.000Z`);
+  const day = date.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setUTCDate(date.getUTCDate() + diff);
+  return date.toISOString().slice(0, 10);
+}
+
+function previousCompletedWeekKeyFromIso(iso) {
+  const currentWeekKey = weekKeyJstFromIso(iso);
+  const date = new Date(`${currentWeekKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 7);
+  return date.toISOString().slice(0, 10);
+}
+
+function canonicalVoteMetadata(receivedAtIso, payloadTimestamp) {
+  const firstVotedAt = text(receivedAtIso);
+  const metadata = {
+    firstVotedAt,
+    weekKey: weekKeyJstFromIso(firstVotedAt),
+  };
+  const clientTimestamp = text(payloadTimestamp);
+  if (clientTimestamp) metadata.clientTimestamp = clientTimestamp;
+  return metadata;
+}
+
+async function hmacSha256Hex(secret, message) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    utf8(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign("HMAC", key, utf8(message));
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -20,7 +67,7 @@ async function hashWithSecret(secret, scope, value) {
   }
   const normalized = text(value);
   if (!normalized) return "";
-  return sha256Hex(`${scope}:${normalizedSecret}:${normalized}`);
+  return hmacSha256Hex(normalizedSecret, `${scope}:${normalized}`);
 }
 
 function jsonResponse(payload, status = 200, headers = {}) {
@@ -28,17 +75,6 @@ function jsonResponse(payload, status = 200, headers = {}) {
     status,
     headers: { ...JSON_HEADERS, ...headers },
   });
-}
-
-function weekKeyJst(iso) {
-  const raw = text(iso);
-  const date = new Date(raw || Date.now());
-  const jstMs = date.getTime() + 9 * 60 * 60 * 1000;
-  const jst = new Date(jstMs);
-  const day = jst.getUTCDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  jst.setUTCDate(jst.getUTCDate() + diff);
-  return jst.toISOString().slice(0, 10);
 }
 
 async function readJsonObject(bucket, key) {
@@ -55,7 +91,7 @@ async function writeVote(request, env) {
     return jsonResponse({ status: "error", message: "headingId と clientId は必須です。" }, 400);
   }
 
-  const now = new Date().toISOString();
+  const receivedAt = canonicalServerTimestamp();
   const clientHash = await hashWithSecret(env.FAVORITES_HASH_SECRET, "client", clientId);
   const ip = text(request.headers.get("CF-Connecting-IP"));
   const ua = text(request.headers.get("User-Agent"));
@@ -68,7 +104,7 @@ async function writeVote(request, env) {
     return jsonResponse({ status: "duplicate", accepted: false, key });
   }
 
-  const firstVotedAt = text(payload?.timestamp) || now;
+  const voteMeta = canonicalVoteMetadata(receivedAt, payload?.timestamp);
   const body = {
     headingId,
     clientHash,
@@ -77,11 +113,12 @@ async function writeVote(request, env) {
     videoTitle: text(payload?.videoTitle),
     headingStart: text(payload?.headingStart),
     sourceMode: text(payload?.sourceMode) || "unknown",
-    firstVotedAt,
-    weekKey: weekKeyJst(firstVotedAt),
+    firstVotedAt: voteMeta.firstVotedAt,
+    weekKey: voteMeta.weekKey,
     ipHash,
     uaHash,
   };
+  if (voteMeta.clientTimestamp) body.clientTimestamp = voteMeta.clientTimestamp;
 
   await env.FAVORITES_BUCKET.put(key, JSON.stringify(body), {
     httpMetadata: {
@@ -135,13 +172,26 @@ async function rebuildAggregates(request, env) {
     if (text(vote.firstVotedAt) < text(item.firstVotedAt)) item.firstVotedAt = text(vote.firstVotedAt);
     if (text(vote.firstVotedAt) > text(item.lastVotedAt)) item.lastVotedAt = text(vote.firstVotedAt);
 
-    const weekKey = text(vote.weekKey) || weekKeyJst(text(vote.firstVotedAt));
+    const weekKey = text(vote.weekKey) || weekKeyJstFromIso(text(vote.firstVotedAt));
     if (!weekly.has(weekKey)) weekly.set(weekKey, new Map());
     const weekMap = weekly.get(weekKey);
     if (!weekMap.has(headingId)) {
-      weekMap.set(headingId, { ...item, voteCount: 0 });
+      weekMap.set(headingId, {
+        headingId,
+        videoId: text(vote.videoId),
+        headingTitle: text(vote.headingTitle) || headingId,
+        videoTitle: text(vote.videoTitle),
+        headingStart: text(vote.headingStart),
+        sourceMode: text(vote.sourceMode) || "unknown",
+        voteCount: 0,
+        firstVotedAt: text(vote.firstVotedAt),
+        lastVotedAt: text(vote.firstVotedAt),
+      });
     }
-    weekMap.get(headingId).voteCount += 1;
+    const weekItem = weekMap.get(headingId);
+    weekItem.voteCount += 1;
+    if (text(vote.firstVotedAt) < text(weekItem.firstVotedAt)) weekItem.firstVotedAt = text(vote.firstVotedAt);
+    if (text(vote.firstVotedAt) > text(weekItem.lastVotedAt)) weekItem.lastVotedAt = text(vote.firstVotedAt);
   }
 
   const sorted = Array.from(ranking.values()).sort((a, b) => {
@@ -151,8 +201,8 @@ async function rebuildAggregates(request, env) {
   });
 
   const generatedAt = new Date().toISOString();
-  const currentWeekKey = weekKeyJst(generatedAt);
-  const weeklyCurrent = Array.from((weekly.get(currentWeekKey) || new Map()).values()).sort((a, b) => {
+  const recentWeekKey = previousCompletedWeekKeyFromIso(generatedAt);
+  const weeklyCurrent = Array.from((weekly.get(recentWeekKey) || new Map()).values()).sort((a, b) => {
     if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
     if (a.firstVotedAt !== b.firstVotedAt) return a.firstVotedAt.localeCompare(b.firstVotedAt);
     return a.headingId.localeCompare(b.headingId);
@@ -160,9 +210,9 @@ async function rebuildAggregates(request, env) {
 
   const allTime = { generatedAt, source: "favorites/unique", items: sorted };
   const hall = { generatedAt, source: "favorites/unique", items: sorted.slice(0, 3) };
-  const recent = { generatedAt, source: "favorites/unique", weekKey: currentWeekKey, items: weeklyCurrent.slice(0, 5) };
+  const recent = { generatedAt, source: "favorites/unique", weekKey: recentWeekKey, items: weeklyCurrent.slice(0, 5) };
   const currentRanking = { generatedAt, source: "favorites/unique", items: sorted };
-  const snapshotDate = weekKeyJst(generatedAt);
+  const snapshotDate = jstDateFromIso(generatedAt);
   const dailySnapshot = { generatedAt, source: "favorites/unique", snapshotDate, items: sorted };
 
   await Promise.all([
@@ -185,7 +235,7 @@ async function rebuildAggregates(request, env) {
     );
   }
 
-  return jsonResponse({ status: "ok", uniqueVotes: votes.length, weekKey: currentWeekKey });
+  return jsonResponse({ status: "ok", uniqueVotes: votes.length, weekKey: recentWeekKey });
 }
 
 async function readAggregate(env, key) {
@@ -220,4 +270,13 @@ export default {
 
     return jsonResponse({ status: "error", message: "not found" }, 404);
   },
+};
+
+export {
+  canonicalServerTimestamp,
+  jstDateFromIso,
+  weekKeyJstFromIso,
+  previousCompletedWeekKeyFromIso,
+  hashWithSecret,
+  canonicalVoteMetadata,
 };
