@@ -12,8 +12,9 @@ from exporter import favorites_r2_to_sheet
 
 
 class FakeWorksheet:
-    def __init__(self):
+    def __init__(self, col_count: int = 14):
         self.values: list[list[str]] = []
+        self.col_count = col_count
 
     def get_all_values(self):
         return [row[:] for row in self.values]
@@ -48,6 +49,9 @@ class FakeWorksheet:
             self.values = [FAVORITES_SHEET_HEADERS[:]]
         self.values.extend([row[:] for row in rows])
 
+    def add_cols(self, cols):
+        self.col_count += cols
+
 
 class FakeBook:
     def __init__(self, sheet):
@@ -66,13 +70,16 @@ class FakeClient:
 
 
 class FavoritesMirrorTests(unittest.TestCase):
-    def test_build_rows_with_source_video_title_resolution(self):
+    def test_build_rows_with_source_video_title_resolution_by_video_id(self):
         talks_payload = {
             "talks": [
                 {
                     "key": "h1",
                     "name": "見出し1",
-                    "subsections": [{"videoTitle": "元動画A"}],
+                    "subsections": [
+                        {"videoTitle": "元動画A", "videoUrl": "https://www.youtube.com/watch?v=AAAAAAAAAAA"},
+                        {"videoTitle": "元動画B", "videoUrl": "https://www.youtube.com/watch?v=BBBBBBBBBBB"},
+                    ],
                 }
             ]
         }
@@ -83,7 +90,7 @@ class FavoritesMirrorTests(unittest.TestCase):
                 {
                     "headingId": "h1",
                     "headingTitle": "見出し1",
-                    "videoId": "v1",
+                    "videoId": "BBBBBBBBBBB",
                     "voteCount": 3,
                     "firstVotedAt": "2026-04-20T00:00:00Z",
                     "lastVotedAt": "2026-04-21T00:00:00Z",
@@ -98,8 +105,46 @@ class FavoritesMirrorTests(unittest.TestCase):
             heading_title_map=title_map,
         )
 
-        self.assertEqual(rows[0][5], "元動画A")
+        self.assertEqual(rows[0][5], "元動画B")
         self.assertEqual(rows[0][10], "current_ranking")
+
+    def test_build_rows_with_source_video_title_resolution_unique_heading_fallback(self):
+        talks_payload = {
+            "talks": [
+                {
+                    "key": "h1",
+                    "name": "見出し1",
+                    "subsections": [{"videoTitle": "元動画A", "videoUrl": ""}],
+                }
+            ]
+        }
+        title_map = build_heading_video_title_map(talks_payload)
+        rows = build_sheet_rows_from_items(
+            payload={"generatedAt": "2026-04-21T00:00:00Z", "items": [{"headingId": "h1", "voteCount": 1}]},
+            aggregate_type="current_ranking",
+            source_json_url="favorites/exports/current_ranking.json",
+            heading_title_map=title_map,
+        )
+        self.assertEqual(rows[0][5], "元動画A")
+
+    def test_build_rows_with_source_video_title_resolution_ambiguous_heading_returns_blank(self):
+        talks_payload = {
+            "talks": [
+                {
+                    "key": "h1",
+                    "name": "見出し1",
+                    "subsections": [{"videoTitle": "元動画A", "videoUrl": ""}, {"videoTitle": "元動画B", "videoUrl": ""}],
+                }
+            ]
+        }
+        title_map = build_heading_video_title_map(talks_payload)
+        rows = build_sheet_rows_from_items(
+            payload={"generatedAt": "2026-04-21T00:00:00Z", "items": [{"headingId": "h1", "voteCount": 1}]},
+            aggregate_type="current_ranking",
+            source_json_url="favorites/exports/current_ranking.json",
+            heading_title_map=title_map,
+        )
+        self.assertEqual(rows[0][5], "")
 
     def test_daily_upsert_key_snapshot_date_plus_heading_id(self):
         sheet = FakeWorksheet()
@@ -124,6 +169,20 @@ class FavoritesMirrorTests(unittest.TestCase):
         self.assertEqual((updated, appended), (1, 1))
         self.assertEqual(sheet.values[1][3], "new")
         self.assertEqual(sheet.values[2][2], "h2")
+
+    def test_daily_upsert_ensures_required_columns_for_new_favorites_sheet(self):
+        sheet = FakeWorksheet(col_count=12)
+        client = FakeClient(sheet)
+        rows = [["2026-04-21", "", "h2", "add", "v2", "", "1", "1", "", "", "daily_snapshot", "", "", ""]]
+
+        upsert_daily_snapshot_rows(
+            client=client,
+            spreadsheet_id="dummy",
+            worksheet_name="favorites_daily_snapshots",
+            rows=rows,
+        )
+
+        self.assertGreaterEqual(sheet.col_count, len(FAVORITES_SHEET_HEADERS))
 
     def test_recent_recommendations_uses_previous_week_when_missing(self):
         week_key = previous_week_key_jst(datetime(2026, 4, 21, tzinfo=UTC))
