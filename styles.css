@@ -199,6 +199,10 @@ body[data-ambient-tone="calm"] {
   margin-top: 2px;
 }
 
+.results > * {
+  min-width: 0;
+}
+
 .card {
   border: 1px solid #e4ece4;
   border-radius: 10px;
@@ -460,15 +464,23 @@ body[data-ambient-tone="calm"] .card:focus-within {
   min-width: 0;
 }
 
+.favorite-panel-head > * {
+  min-width: 0;
+}
+
 .favorite-panel-title {
   font-weight: 600;
   min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .favorite-panel-meta {
   font-size: 0.8rem;
   color: #475569;
   min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .favorite-panel-marker {
@@ -496,6 +508,9 @@ body[data-ambient-tone="calm"] .card:focus-within {
   margin: 0;
   color: #64748b;
   font-size: 0.86rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .recommend-title {

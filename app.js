@@ -24,6 +24,14 @@ const FAVORITES_WRITE_BASE_URL_CANDIDATES = [
   text(window.__TALK_INDEX_FAVORITES_BASE_URL__),
   text(location.origin),
 ].filter((url, index, self) => url && self.indexOf(url) === index);
+const FAVORITES_RECENT_PATH_CANDIDATES = [
+  "/favorites/aggregates/recent_recommendations.json",
+  "/favorites/recent_recommendations.json",
+];
+const FAVORITES_HALL_PATH_CANDIDATES = [
+  "/favorites/aggregates/hall_of_fame.json",
+  "/favorites/hall_of_fame.json",
+];
 
 const state = {
   search: "",
@@ -1199,6 +1207,20 @@ async function fetchFavoritesAggregate(path) {
   throw new Error(lastError || `${path} の取得に失敗しました`);
 }
 
+async function fetchFavoritesAggregateFromCandidates(kind, paths) {
+  let lastError = "";
+  for (const path of (Array.isArray(paths) ? paths : [])) {
+    try {
+      return await fetchFavoritesAggregate(path);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      lastError = message;
+      console.warn(`[favorites] ${kind} aggregate fetch failed: ${path}`, message);
+    }
+  }
+  throw new Error(lastError || `${kind} 集計データの取得に失敗しました`);
+}
+
 async function syncFavoriteVote(headingId, sourceTalk = null) {
   const normalized = text(headingId);
   if (!normalized || !state.favoritedHeadingIds.has(normalized)) return false;
@@ -1249,14 +1271,15 @@ async function loadFavoritesDataIfNeeded() {
   render();
   try {
     const [recent, hall] = await Promise.all([
-      fetchFavoritesAggregate("/favorites/recent_recommendations.json"),
-      fetchFavoritesAggregate("/favorites/hall_of_fame.json"),
+      fetchFavoritesAggregateFromCandidates("recent", FAVORITES_RECENT_PATH_CANDIDATES),
+      fetchFavoritesAggregateFromCandidates("hall", FAVORITES_HALL_PATH_CANDIDATES),
     ]);
     state.favoritesRecent = recent;
     state.favoritesHall = hall;
     state.favoritesDataStatus = "ready";
   } catch (error) {
-    state.favoritesDataError = error instanceof Error ? error.message : String(error);
+    state.favoritesDataError = "集計データを取得できませんでした";
+    console.warn("[favorites] aggregate load failed", error);
     state.favoritesDataStatus = "error";
   }
 }
@@ -1821,7 +1844,7 @@ function renderFavoritesTab() {
   if (state.favoritesDataStatus === "error") {
     const note = document.createElement("p");
     note.className = "favorite-panel-empty";
-    note.textContent = `集計の取得に失敗しました: ${state.favoritesDataError}`;
+    note.textContent = state.favoritesDataError || "集計データを取得できませんでした";
     refs.results.appendChild(note);
   }
 }
