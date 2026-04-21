@@ -176,14 +176,36 @@ python -m http.server 8000
   - `talk_index:favorites:client_id`
   - `talk_index:favorites:heading_ids`
   - `talk_index:favorites:voted_heading_ids`
+  - `talk_index:favorites:unsynced_heading_ids`
 - vote送信ルール:
-  - 同一端末で同一 heading を初回お気に入りした時だけ `POST /favorites/vote` を送信
+  - UIの☆→★は即時反映（ローカル保存を先行）
+  - `alreadyVotedHeadingIds` は `POST /favorites/vote` の成功（2xx）または duplicate（409）後にだけ確定
+  - 通信失敗時は `unsyncedFavoriteHeadingIds` に残し、将来再送する
   - 解除時は vote 取消APIは呼ばない
-  - 再度お気に入りしても再送しない
+  - 既にサーバ成功済みの heading は再送しない
 - お気に入りタブの3カード:
   - お気に入りリスト（localStorage基準）
   - 最近のおすすめ（`/favorites/recent_recommendations.json`）
   - 殿堂入り（`/favorites/hall_of_fame.json`）
+
+### favorites READ/WRITE URL 設定
+
+- favorites は READ（aggregate JSON 取得）と WRITE（vote API送信）を分離可能です。
+- aggregate JSON と vote API は別ホスト構成でも動作します。
+- READ 候補順:
+  1. `window.__TALK_INDEX_FAVORITES_READ_BASE_URL__`
+  2. `window.__TALK_INDEX_FAVORITES_BASE_URL__`
+  3. `TALK_INDEX_DATA_URL` から `/index/latest.json` を除いたURL
+  4. `location.origin`
+- WRITE 候補順:
+  1. `window.__TALK_INDEX_FAVORITES_WRITE_BASE_URL__`
+  2. `window.__TALK_INDEX_FAVORITES_API_BASE_URL__`
+  3. `window.__TALK_INDEX_FAVORITES_BASE_URL__`
+  4. `location.origin`
+- 未同期票の再送トリガー:
+  - アプリ起動時
+  - お気に入りタブ遷移時
+  - 再お気に入り時（toggle直後）
 
 ### Workerで必要な環境変数
 
