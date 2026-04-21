@@ -629,6 +629,7 @@ function buildTalkRecommendationsForTalk(talk) {
       title: hit.talk.name || "タイトルなし",
       subtitle: formatTalkRecommendationSubtitle(hit),
       reason: `${word}といえば……`,
+      searchQuery: text(talk.name),
     });
   });
 
@@ -642,6 +643,7 @@ function buildTalkRecommendationsForTalk(talk) {
       title: fallback.talk.name || "タイトルなし",
       subtitle: formatTalkRecommendationSubtitle(fallback),
       reason: "こんな話題もおすすめ",
+      searchQuery: text(talk.name),
     });
   }
 
@@ -1461,7 +1463,7 @@ function createRecommendationBlock(items, mode) {
 
     button.append(main, sub, reason);
     button.addEventListener("click", () => {
-      openCardFromRecommendation(mode, item.id);
+      void applyRecommendationSearch(item);
     });
 
     li.appendChild(button);
@@ -1469,6 +1471,31 @@ function createRecommendationBlock(items, mode) {
   });
   wrap.appendChild(list);
   return wrap;
+}
+
+async function applyRecommendationSearch(item) {
+  const searchQuery = text(item?.searchQuery) || text(item?.title);
+  if (!searchQuery) return;
+
+  state.viewMode = "video";
+  state.search = searchQuery;
+  refs.search.value = searchQuery;
+  state.randomTalkKeys = null;
+  state.randomSection = "";
+  state.openTalkKeys = new Set();
+  state.openVideoKeys = new Set();
+  state.isVideoExpandLock = false;
+  state.videoAutoCollapseAnchor = null;
+
+  if (state.searchIndexStatus === "idle") {
+    await loadSearchIndexIfNeeded();
+  }
+
+  render();
+  requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    refs.search.focus();
+  });
 }
 
 function openCardFromRecommendation(mode, key) {
