@@ -1,0 +1,32 @@
+name: Rebuild favorites aggregates
+
+on:
+  schedule:
+    # 毎日 17:20 JST = 08:20 UTC
+    - cron: "20 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  rebuild-favorites-aggregates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Rebuild favorites aggregate JSON in R2
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: python exporter/rebuild_favorites_aggregates.py

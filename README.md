@@ -122,6 +122,55 @@ python -m http.server 8000
 - `index/talks.json` : トーク単位表示用データ
 - `index/search_index.json` : 検索用インデックス
 
+
+## お気に入り投票（R2正本, R2 read model）
+
+今回追加したお気に入り基盤は、**R2を正本**として次を分離しています。
+
+- 書き込み（投票）: Worker `POST /favorites/vote`
+- 読み取り（表示）: Worker `GET /favorites/*.json`
+- 集計更新: `python exporter/rebuild_favorites_aggregates.py`（R2上の原票から再集計）
+
+### 保存構造（R2）
+
+- 原票（ユニーク投票）
+  - `favorites/unique/<headingId>/<clientHash>.json`
+- 集計済みJSON（read model）
+  - `favorites/aggregates/all_time.json`
+  - `favorites/aggregates/hall_of_fame.json`
+  - `favorites/aggregates/recent_recommendations.json`
+  - `favorites/aggregates/weekly/<weekKey>.json`
+- エクスポート（シート同期しやすい形式）
+  - `favorites/exports/current_ranking.json`
+  - `favorites/exports/daily_snapshot/<YYYY-MM-DD>.json`
+
+### 重複投票抑止
+
+- 主判定: `headingId + clientId`
+- Worker側で `clientId` を secret hash 化し、`favorites/unique/.../<clientHash>.json` を**決定的キー**として保存
+- 同キーが既存なら duplicate/no-op を返し、集計を増やしません
+- raw `clientId` / raw IP は保存しません（`clientHash`, optional `ipHash`, `uaHash` のみ）
+
+### フロント接続インターフェース
+
+`favorites-api.js` に次を追加しています。
+
+- `sendFavoriteVote(baseUrl, payload)`
+- `fetchHallOfFame(baseUrl)`
+- `fetchRecentRecommendations(baseUrl)`
+- `fetchFavoriteRanking(baseUrl)`
+
+### Workerで必要な環境変数
+
+- `FAVORITES_HASH_SECRET`
+- `FAVORITES_ADMIN_TOKEN`
+- R2 binding: `FAVORITES_BUCKET`
+
+### 集計ジョブ
+
+GitHub Actions `rebuild_favorites_aggregates.yml` を追加しています。
+R2内の原票から read model を再生成し、R2に上書き保存します。
+
 ## ビルド契約（静的フロント）
 
 - 前提 Node: **20.x**（`package.json` / `.nvmrc`）
