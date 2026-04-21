@@ -268,6 +268,12 @@ body[data-ambient-tone="calm"] .card:focus-within {
   gap: 8px;
   margin-bottom: 4px;
   font-size: 14px;
+  min-width: 0;
+}
+
+.card-title-row > :first-child {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .card-title-row a {
@@ -329,19 +335,29 @@ body[data-ambient-tone="calm"] .card:focus-within {
 }
 
 .favorite-toggle {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  border-radius: 8px;
-  min-width: 36px;
-  min-height: 32px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  appearance: none;
+  width: 36px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
   cursor: pointer;
   color: #f59e0b;
   font-size: 18px;
   line-height: 1;
+  opacity: 0.92;
 }
 
 .favorite-toggle:hover {
-  background: #fff7ed;
+  opacity: 1;
+}
+
+.favorite-toggle:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
 }
 
 .favorite-toggle--row {
@@ -427,6 +443,8 @@ body[data-ambient-tone="calm"] .card:focus-within {
   border-radius: 10px;
   background: #fff;
   overflow: hidden;
+  width: 100%;
+  min-width: 0;
 }
 
 .favorite-panel-head {
@@ -435,19 +453,22 @@ body[data-ambient-tone="calm"] .card:focus-within {
   background: #f8fafc;
   padding: 10px;
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
   text-align: left;
+  min-width: 0;
 }
 
 .favorite-panel-title {
   font-weight: 600;
+  min-width: 0;
 }
 
 .favorite-panel-meta {
   font-size: 0.8rem;
   color: #475569;
+  min-width: 0;
 }
 
 .favorite-panel-marker {
@@ -456,6 +477,19 @@ body[data-ambient-tone="calm"] .card:focus-within {
 
 .favorite-panel-body {
   padding: 8px;
+  min-width: 0;
+}
+
+.favorite-panel-results {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.favorite-panel-results .card {
+  width: 100%;
+  min-width: 0;
 }
 
 .favorite-panel-empty {

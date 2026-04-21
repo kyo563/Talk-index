@@ -1603,6 +1603,9 @@ function renderTalkCards(talks, options = {}) {
 
   if (appendToResults) refs.results.innerHTML = "";
   const container = appendToResults ? refs.results : document.createElement("div");
+  if (!appendToResults) {
+    container.className = "results favorite-panel-results";
+  }
 
   talks.forEach((talk) => {
     const card = document.createElement("article");
