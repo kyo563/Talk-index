@@ -1,4 +1,5 @@
 import { createInvalidJsonShapeError, createTargetFetchError, fetchJsonFromCandidates } from "./src/data/fetch-json.js";
+import { fetchHallOfFame, fetchRecentRecommendations, sendFavoriteVote as sendFavoriteVoteRequest } from "./src/features/favorites.js";
 
 const configuredDataUrl = text(window.TALK_INDEX_DATA_URL);
 const DATA_URL_CANDIDATES = configuredDataUrl
@@ -26,15 +27,6 @@ const FAVORITES_WRITE_BASE_URL_CANDIDATES = [
   text(window.__TALK_INDEX_FAVORITES_BASE_URL__),
   text(location.origin),
 ].filter((url, index, self) => url && self.indexOf(url) === index);
-const FAVORITES_RECENT_PATH_CANDIDATES = [
-  "/favorites/aggregates/recent_recommendations.json",
-  "/favorites/recent_recommendations.json",
-];
-const FAVORITES_HALL_PATH_CANDIDATES = [
-  "/favorites/aggregates/hall_of_fame.json",
-  "/favorites/hall_of_fame.json",
-];
-
 const state = {
   search: "",
   videos: [],
@@ -1168,21 +1160,8 @@ async function sendFavoriteVote(payload) {
   let lastError = "";
   for (const baseUrl of FAVORITES_WRITE_BASE_URL_CANDIDATES) {
     try {
-      const response = await fetch(`${text(baseUrl).replace(/\/$/, "")}/favorites/vote`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload || {}),
-      });
-      const isJson = (response.headers.get("content-type") || "").toLowerCase().includes("application/json");
-      const body = isJson ? await response.json().catch(() => null) : null;
-      const duplicate = response.status === 409
-        || body?.code === "duplicate"
-        || body?.status === "duplicate"
-        || body?.duplicate === true;
-      if (response.ok || duplicate) {
-        return { ok: true, duplicate, status: response.status, body, baseUrl };
-      }
-      lastError = `${baseUrl}: HTTP ${response.status}`;
+      const result = await sendFavoriteVoteRequest(baseUrl, payload);
+      return { ...result, baseUrl };
     } catch (error) {
       lastError = `${baseUrl}: ${error instanceof Error ? error.message : String(error)}`;
     }
@@ -1190,20 +1169,25 @@ async function sendFavoriteVote(payload) {
   throw new Error(lastError || "favorites vote 送信に失敗しました");
 }
 
-async function fetchFavoritesAggregateFromCandidates(kind, paths) {
-  const targetName = `favorites aggregate(${kind})`;
-  const candidates = [];
-  (Array.isArray(paths) ? paths : []).forEach((path) => {
-    FAVORITES_READ_BASE_URL_CANDIDATES.forEach((baseUrl) => {
-      candidates.push(`${text(baseUrl).replace(/\/$/, "")}${path}`);
-    });
-  });
-  try {
-    return await fetchJsonFromCandidates(candidates, { targetName });
-  } catch (error) {
-    console.warn(`[favorites] ${kind} aggregate fetch failed`, { kind, candidates, error });
-    throw error;
+async function fetchFavoritesAggregate(kind) {
+  const loaders = {
+    recent: fetchRecentRecommendations,
+    hall: fetchHallOfFame,
+  };
+  const load = loaders[kind];
+  if (!load) throw new Error(`unsupported favorites aggregate kind: ${kind}`);
+
+  let lastError = null;
+  for (const baseUrl of FAVORITES_READ_BASE_URL_CANDIDATES) {
+    try {
+      return await load(baseUrl);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[favorites] ${kind} aggregate fetch failed`, { kind, baseUrl, error });
+    }
   }
+
+  throw (lastError instanceof Error ? lastError : new Error(`favorites aggregate(${kind}) の取得に失敗しました。`));
 }
 
 async function syncFavoriteVote(headingId, sourceTalk = null) {
@@ -1256,8 +1240,8 @@ async function loadFavoritesDataIfNeeded() {
   render();
   try {
     const [recent, hall] = await Promise.all([
-      fetchFavoritesAggregateFromCandidates("recent", FAVORITES_RECENT_PATH_CANDIDATES),
-      fetchFavoritesAggregateFromCandidates("hall", FAVORITES_HALL_PATH_CANDIDATES),
+      fetchFavoritesAggregate("recent"),
+      fetchFavoritesAggregate("hall"),
     ]);
     state.favoritesRecent = recent;
     state.favoritesHall = hall;
