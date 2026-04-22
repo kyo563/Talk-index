@@ -464,11 +464,16 @@ body[data-ambient-tone="calm"] .card:focus-within {
   min-width: 0;
 }
 
+.favorite-panel-head--no-meta {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .favorite-panel-head > * {
   min-width: 0;
 }
 
 .favorite-panel-title {
+  font-size: 14px;
   font-weight: 600;
   min-width: 0;
   overflow-wrap: anywhere;

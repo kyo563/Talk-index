@@ -1,6 +1,6 @@
 import { createInvalidJsonShapeError, createTargetFetchError, fetchJsonFromCandidates } from "./src/data/fetch-json.js";
 import { fetchHallOfFame, fetchRecentRecommendations, sendFavoriteVote as sendFavoriteVoteRequest } from "./src/features/favorites.js";
-import { getFavoritesMeta, getModeMessage } from "./src/ui/render-messages.js";
+import { getModeMessage } from "./src/ui/render-messages.js";
 
 const configuredDataUrl = text(window.TALK_INDEX_DATA_URL);
 const DATA_URL_CANDIDATES = configuredDataUrl
@@ -901,7 +901,7 @@ function createAnchor(href, label) {
   return a;
 }
 
-function buildFormattedFragment(raw) {
+function buildHeadingFormattedFragment(raw) {
   const fragment = document.createDocumentFragment();
   const value = String(raw || "");
   const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|--[^-]+--|-[^-]+-)/g;
@@ -1106,18 +1106,18 @@ function initAmbientScene() {
   ambientScene.rafId = window.requestAnimationFrame(animateAmbientScene);
 }
 
-function createFormattedSpan(raw) {
+function createHeadingFormattedSpan(raw) {
   const span = document.createElement("span");
-  span.appendChild(buildFormattedFragment(raw));
+  span.appendChild(buildHeadingFormattedFragment(raw));
   return span;
 }
 
-function createFormattedAnchor(href, label) {
+function createHeadingFormattedAnchor(href, label) {
   const a = document.createElement("a");
   a.href = href;
   a.target = "_blank";
   a.rel = "noopener noreferrer";
-  a.appendChild(buildFormattedFragment(label));
+  a.appendChild(buildHeadingFormattedFragment(label));
   return a;
 }
 
@@ -1420,15 +1420,15 @@ function createRecommendationBlock(items, mode) {
 
     const main = document.createElement("span");
     main.className = "recommend-main";
-    main.appendChild(buildFormattedFragment(item.title));
+    main.textContent = item.title;
 
     const sub = document.createElement("span");
     sub.className = "recommend-sub";
-    sub.appendChild(buildFormattedFragment(item.subtitle));
+    sub.textContent = item.subtitle;
 
     const reason = document.createElement("span");
     reason.className = "recommend-reason";
-    reason.appendChild(buildFormattedFragment(item.reason));
+    reason.textContent = item.reason;
 
     button.append(main, sub, reason);
     button.addEventListener("click", () => {
@@ -1586,8 +1586,8 @@ function renderCards(videos) {
         }
 
         const label = sec.sectionUrl && isValidHttpUrl(sec.sectionUrl)
-          ? createFormattedAnchor(sec.sectionUrl, sec.name)
-          : createFormattedSpan(sec.name);
+          ? createHeadingFormattedAnchor(sec.sectionUrl, sec.name)
+          : createHeadingFormattedSpan(sec.name);
         label.classList.add("section-link");
         const headingId = getHeadingIdFromObject(sec, sec.name);
         const sourceTalk = findTalkByHeadingId(headingId);
@@ -1599,7 +1599,7 @@ function renderCards(videos) {
         sec.subsections.forEach((sub) => {
           const li = document.createElement("li");
           li.appendChild(document.createTextNode("- "));
-          li.appendChild(buildFormattedFragment(sub.name));
+          li.appendChild(buildHeadingFormattedFragment(sub.name));
           subList.appendChild(li);
         });
 
@@ -1695,9 +1695,9 @@ function renderTalkCards(talks, options = {}) {
     titleRow.className = "card-title-row";
     const titleLabel = document.createElement("span");
     if (talk.sectionUrl && isValidHttpUrl(talk.sectionUrl)) {
-      titleLabel.appendChild(createFormattedAnchor(talk.sectionUrl, talk.name));
+      titleLabel.appendChild(createHeadingFormattedAnchor(talk.sectionUrl, talk.name));
     } else {
-      titleLabel.appendChild(createFormattedSpan(talk.name));
+      titleLabel.appendChild(createHeadingFormattedSpan(talk.name));
     }
     titleRow.appendChild(titleLabel);
     if (showFavoriteButton) {
@@ -1723,7 +1723,7 @@ function renderTalkCards(talks, options = {}) {
       const li = document.createElement("li");
       const subsectionText = document.createElement("div");
       subsectionText.appendChild(document.createTextNode("- "));
-      subsectionText.appendChild(buildFormattedFragment(sub.name));
+      subsectionText.appendChild(buildHeadingFormattedFragment(sub.name));
       li.appendChild(subsectionText);
 
       subList.appendChild(li);
@@ -1765,7 +1765,8 @@ function renderTalkCards(talks, options = {}) {
   return container;
 }
 
-function createFavoritePanel(title, key, talks, meta = "") {
+function createFavoritePanel(title, key, talks, options = {}) {
+  const { meta = "", showMeta = true } = options;
   const wrap = document.createElement("article");
   wrap.className = "favorite-panel";
 
@@ -1778,13 +1779,22 @@ function createFavoritePanel(title, key, talks, meta = "") {
   const titleEl = document.createElement("span");
   titleEl.className = "favorite-panel-title";
   titleEl.textContent = title;
-  const metaEl = document.createElement("span");
-  metaEl.className = "favorite-panel-meta";
-  metaEl.textContent = meta || `${talks.length}件`;
+
+  if (!showMeta) {
+    head.classList.add("favorite-panel-head--no-meta");
+  }
+
+  const metaEl = showMeta ? document.createElement("span") : null;
+  if (metaEl) {
+    metaEl.className = "favorite-panel-meta";
+    metaEl.textContent = meta || `${talks.length}件`;
+  }
   const marker = document.createElement("span");
   marker.className = "favorite-panel-marker";
   marker.textContent = isOpen ? "▼" : "▶";
-  head.append(titleEl, metaEl, marker);
+  head.append(titleEl);
+  if (metaEl) head.append(metaEl);
+  head.append(marker);
 
   const body = document.createElement("div");
   body.className = "favorite-panel-body";
@@ -1821,16 +1831,12 @@ function renderFavoritesTab() {
   const hallTalks = hallItems.map((item) => findTalkByHeadingId(getHeadingIdFromObject(item))).filter(Boolean);
 
   const favoriteMeta = favoriteTalks.length ? `${favoriteTalks.length}件` : "0件";
-  refs.results.appendChild(createFavoritePanel("お気に入りリスト", "mine", favoriteTalks, favoriteMeta));
+  refs.results.appendChild(createFavoritePanel("お気に入りリスト", "mine", favoriteTalks, { meta: favoriteMeta, showMeta: true }));
 
-  const recentMeta = getFavoritesMeta(
-    state.favoritesDataStatus,
-    `先週 ${state.favoritesRecent?.weekKey || ""}`.trim(),
-  );
-  refs.results.appendChild(createFavoritePanel("最近のおすすめ", "recent", recentTalks, recentMeta));
+  refs.results.appendChild(createFavoritePanel("最近のおすすめ", "recent", recentTalks, { showMeta: false }));
 
-  const hallMeta = getFavoritesMeta(state.favoritesDataStatus, "累計上位");
-  refs.results.appendChild(createFavoritePanel("殿堂入り", "hall", hallTalks, hallMeta));
+  const hallDisplayTalks = hallTalks.slice(0, 5);
+  refs.results.appendChild(createFavoritePanel("殿堂入り", "hall", hallDisplayTalks, { showMeta: false }));
 
 }
 
