@@ -70,11 +70,51 @@ async function hashWithSecret(secret, scope, value) {
   return hmacSha256Hex(normalizedSecret, `${scope}:${normalized}`);
 }
 
-function jsonResponse(payload, status = 200, headers = {}) {
-  return new Response(JSON.stringify(payload), {
+
+function parseAllowedOrigins(value) {
+  return text(value)
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function resolveAllowedOrigin(request, env) {
+  const origin = text(request.headers.get("Origin"));
+  if (!origin) return "";
+  const allowedOrigins = parseAllowedOrigins(env.FAVORITES_ALLOWED_ORIGINS);
+  if (!allowedOrigins.length) return "";
+  if (allowedOrigins.includes("*")) return origin;
+  return allowedOrigins.includes(origin) ? origin : "";
+}
+
+function withCorsHeaders(headers, request, env) {
+  const next = new Headers(headers || {});
+  const allowOrigin = resolveAllowedOrigin(request, env);
+  if (allowOrigin) {
+    next.set("Access-Control-Allow-Origin", allowOrigin);
+  }
+  next.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  next.set("Access-Control-Allow-Headers", "Content-Type, X-Favorites-Admin-Token");
+  next.set("Access-Control-Max-Age", "86400");
+  next.set("Vary", "Origin");
+  return next;
+}
+
+function withCorsResponse(response, request, env) {
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: withCorsHeaders(response.headers, request, env),
+  });
+}
+
+function jsonResponse(payload, status = 200, headers = {}, request = null, env = null) {
+  const response = new Response(JSON.stringify(payload), {
     status,
     headers: { ...JSON_HEADERS, ...headers },
   });
+  if (!request || !env) return response;
+  return withCorsResponse(response, request, env);
 }
 
 async function readJsonObject(bucket, key) {
@@ -88,7 +128,7 @@ async function writeVote(request, env) {
   const headingId = text(payload?.headingId);
   const clientId = text(payload?.clientId);
   if (!headingId || !clientId) {
-    return jsonResponse({ status: "error", message: "headingId と clientId は必須です。" }, 400);
+    return jsonResponse({ status: "error", message: "headingId と clientId は必須です。" }, 400, {}, request, env);
   }
 
   const receivedAt = canonicalServerTimestamp();
@@ -101,7 +141,7 @@ async function writeVote(request, env) {
   const key = `favorites/unique/${encodeURIComponent(headingId)}/${clientHash}.json`;
   const existing = await env.FAVORITES_BUCKET.get(key);
   if (existing) {
-    return jsonResponse({ status: "duplicate", accepted: false, key });
+    return jsonResponse({ status: "duplicate", accepted: false, key }, 200, {}, request, env);
   }
 
   const voteMeta = canonicalVoteMetadata(receivedAt, payload?.timestamp);
@@ -127,13 +167,13 @@ async function writeVote(request, env) {
     },
   });
 
-  return jsonResponse({ status: "accepted", accepted: true, key });
+  return jsonResponse({ status: "accepted", accepted: true, key }, 200, {}, request, env);
 }
 
 async function rebuildAggregates(request, env) {
   const adminToken = text(request.headers.get("x-favorites-admin-token"));
   if (!adminToken || adminToken !== text(env.FAVORITES_ADMIN_TOKEN)) {
-    return jsonResponse({ status: "error", message: "unauthorized" }, 401);
+    return jsonResponse({ status: "error", message: "unauthorized" }, 401, {}, request, env);
   }
 
   const votes = [];
@@ -235,22 +275,26 @@ async function rebuildAggregates(request, env) {
     );
   }
 
-  return jsonResponse({ status: "ok", uniqueVotes: votes.length, weekKey: recentWeekKey });
+  return jsonResponse({ status: "ok", uniqueVotes: votes.length, weekKey: recentWeekKey }, 200, {}, request, env);
 }
 
-async function readAggregate(env, key) {
+async function readAggregate(request, env, key) {
   const object = await env.FAVORITES_BUCKET.get(key);
-  if (!object) return jsonResponse({ status: "error", message: "not found" }, 404, { "cache-control": "no-store" });
+  if (!object) return jsonResponse({ status: "error", message: "not found" }, 404, { "cache-control": "no-store" }, request, env);
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("content-type", "application/json; charset=utf-8");
   headers.set("cache-control", "public, max-age=60");
-  return new Response(object.body, { status: 200, headers });
+  return withCorsResponse(new Response(object.body, { status: 200, headers }), request, env);
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: withCorsHeaders({}, request, env) });
+    }
 
     if (request.method === "POST" && url.pathname === "/favorites/vote") {
       return writeVote(request, env);
@@ -259,16 +303,16 @@ export default {
       return rebuildAggregates(request, env);
     }
     if (request.method === "GET" && url.pathname === "/favorites/hall_of_fame.json") {
-      return readAggregate(env, "favorites/aggregates/hall_of_fame.json");
+      return readAggregate(request, env, "favorites/aggregates/hall_of_fame.json");
     }
     if (request.method === "GET" && url.pathname === "/favorites/recent_recommendations.json") {
-      return readAggregate(env, "favorites/aggregates/recent_recommendations.json");
+      return readAggregate(request, env, "favorites/aggregates/recent_recommendations.json");
     }
     if (request.method === "GET" && url.pathname === "/favorites/current_ranking.json") {
-      return readAggregate(env, "favorites/exports/current_ranking.json");
+      return readAggregate(request, env, "favorites/exports/current_ranking.json");
     }
 
-    return jsonResponse({ status: "error", message: "not found" }, 404);
+    return jsonResponse({ status: "error", message: "not found" }, 404, {}, request, env);
   },
 };
 

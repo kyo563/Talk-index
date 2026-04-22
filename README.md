@@ -236,16 +236,28 @@ python -m http.server 8000
   - お気に入りタブ遷移時
   - 再お気に入り時（toggle直後）
 
-### Workerで必要な環境変数
+### favorites 有効化に必要な設定
 
-- `FAVORITES_HASH_SECRET`
-- `FAVORITES_ADMIN_TOKEN`
-- R2 binding: `FAVORITES_BUCKET`
+- `index.html` に `window.__TALK_INDEX_FAVORITES_BASE_URL__` を設定（vote 送信先 Worker のベースURL）
+- Worker 環境変数 `FAVORITES_ALLOWED_ORIGINS` を設定（許可する Origin をカンマ区切りで列挙）
+- Worker 環境変数 `FAVORITES_HASH_SECRET`
+- Worker 環境変数 `FAVORITES_ADMIN_TOKEN`
+- Worker の R2 binding: `FAVORITES_BUCKET`
 
 ### 集計ジョブ
 
 GitHub Actions `rebuild_favorites_aggregates.yml` を追加しています。
 R2内の原票から read model を再生成し、R2に上書き保存します。
+
+
+### favorites 手動確認手順
+
+1. ブラウザで ★ を押したときの送信先が Worker URL（`__TALK_INDEX_FAVORITES_BASE_URL__`）になっていることを確認
+2. Worker に対する `OPTIONS /favorites/vote` が `204` を返すことを確認
+3. `POST /favorites/vote` が `accepted` または `duplicate` を返すことを確認
+4. R2 に `favorites/unique/...`（`favorites/unique/<headingId>/<clientHash>.json`）が作成されることを確認
+5. GitHub Actions `Rebuild favorites aggregates` を実行
+6. GitHub Actions `Mirror favorites aggregates to Spreadsheet` を実行
 
 ## ビルド契約（静的フロント）
 
