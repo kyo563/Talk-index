@@ -161,7 +161,7 @@ python -m http.server 8000
 
 ### フロント接続インターフェース
 
-`favorites-api.js` に次を追加しています。
+`src/features/favorites.js` に通信関数を集約しています。
 
 - `sendFavoriteVote(baseUrl, payload)`
 - `fetchHallOfFame(baseUrl)`
