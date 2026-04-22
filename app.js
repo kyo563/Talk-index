@@ -64,6 +64,8 @@ const state = {
   favoritesRecent: null,
   favoritesHall: null,
   favoritesCurrentRanking: null,
+  favoritesRankingStatus: "idle",
+  favoritesRankingPromise: null,
   favoritesDataStatus: "idle",
   favoritesDataError: "",
 };
@@ -1346,12 +1348,42 @@ async function loadFavoritesDataIfNeeded() {
     state.favoritesRecent = recent;
     state.favoritesHall = hall;
     state.favoritesCurrentRanking = ranking;
+    state.favoritesRankingStatus = "ready";
+    state.favoritesRankingPromise = null;
     state.favoriteCountByTalkKey = new Map();
     state.favoritesDataStatus = "ready";
   } catch (error) {
     console.warn("[favorites] aggregate load failed", error);
     state.favoritesDataStatus = "error";
   }
+}
+
+async function loadFavoriteRankingIfNeeded() {
+  if (Array.isArray(state.favoritesCurrentRanking) || Array.isArray(state.favoritesCurrentRanking?.items)) {
+    state.favoritesRankingStatus = "ready";
+    return;
+  }
+  if (state.favoritesRankingStatus === "loading" && state.favoritesRankingPromise) {
+    await state.favoritesRankingPromise;
+    return;
+  }
+  state.favoritesRankingStatus = "loading";
+  state.favoritesRankingPromise = (async () => {
+    try {
+      const ranking = await fetchFavoritesAggregate("ranking");
+      state.favoritesCurrentRanking = ranking;
+      state.favoriteCountByTalkKey = new Map();
+      state.talkRecommendationCache = new Map();
+      state.favoritesRankingStatus = "ready";
+      render();
+    } catch (error) {
+      console.warn("[favorites] ranking load failed", error);
+      state.favoritesRankingStatus = "error";
+    } finally {
+      state.favoritesRankingPromise = null;
+    }
+  })();
+  await state.favoritesRankingPromise;
 }
 
 async function toggleFavoriteHeading(headingId, sourceTalk = null) {
@@ -2013,6 +2045,9 @@ function render() {
   updateTabs();
   updateServerStatus("ok", state.viewMode === "favorites" ? state.favoritedHeadingIds.size : filtered.length);
   updateToggleAllButton();
+  if (state.viewMode === "talk" && state.openTalkKeys.size > 0) {
+    void loadFavoriteRankingIfNeeded();
+  }
   if (isVideo) {
     renderCards(filtered);
   } else if (state.viewMode === "talk") {
