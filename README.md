@@ -168,6 +168,8 @@ python -m http.server 8000
 - `fetchRecentRecommendations(baseUrl)`
 - `fetchFavoriteRanking(baseUrl)`
 
+JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates` など）を使い、favorites 側で独自の汎用JSON fetch helperは持たない方針です。
+
 ### フロントUI（MVP）
 
 - タブ: `動画単位 / トーク単位 / お気に入り`
