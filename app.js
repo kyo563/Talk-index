@@ -818,14 +818,18 @@ async function loadSearchIndexIfNeeded() {
 }
 
 function parseSearch(raw) {
-  const q = text(raw).toLowerCase();
+  const q = normalizeSearchKeyword(raw);
   if (!q) return { mode: "none", keyword: "" };
   if (q.startsWith("#")) return { mode: "tag", keyword: q.slice(1).trim() };
   return { mode: "normal", keyword: q };
 }
 
+function normalizeSearchKeyword(raw) {
+  return text(raw).toLowerCase();
+}
+
 function includesKeyword(value, keyword) {
-  return String(value || "").toLowerCase().includes(keyword);
+  return normalizeSearchKeyword(value).includes(keyword);
 }
 
 function canSkipSearch(search) {
@@ -886,11 +890,41 @@ function hitVideo(video, search) {
   });
 }
 
-function hitTalk(talk, search) {
-  if (canSkipSearch(search)) return true;
-  if (search.mode === "tag") return false;
-  if (includesKeyword(talk.name, search.keyword)) return true;
-  return talk.subsections.some((sub) => includesKeyword(sub.name, search.keyword));
+function getTalkVideoTitle(talk) {
+  return text(talk?.subsections?.[0]?.videoTitle || talk?.videoTitle);
+}
+
+function getTalkVideoKey(talk) {
+  const url = text(talk?.subsections?.[0]?.videoUrl || talk?.videoUrl);
+  const title = getTalkVideoTitle(talk);
+  return url || title;
+}
+
+function getTalkOrderValue(talk) {
+  const candidates = [talk?.order, talk?.section_order, talk?.sectionOrder];
+  for (const candidate of candidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+    if (typeof candidate === "string" && candidate.trim() !== "" && Number.isFinite(Number(candidate))) {
+      return Number(candidate);
+    }
+  }
+  return null;
+}
+
+function getTalkMatchFlags(talk, search, matchedIds) {
+  if (canSkipSearch(search)) return { matched: true, contentMatched: true, titleMatched: true };
+  if (search.mode === "tag") return { matched: false, contentMatched: false, titleMatched: false };
+
+  const sectionMatched = includesKeyword(talk.name, search.keyword);
+  const subsectionMatched = talk.subsections.some((sub) => includesKeyword(sub.name, search.keyword));
+  const contentMatched = sectionMatched || subsectionMatched || hitTalkBySearchIndex(talk, matchedIds);
+  const titleMatched = includesKeyword(getTalkVideoTitle(talk), search.keyword);
+
+  return {
+    matched: contentMatched || titleMatched,
+    contentMatched,
+    titleMatched,
+  };
 }
 
 function createAnchor(href, label) {
@@ -1275,39 +1309,74 @@ async function toggleFavoriteHeading(headingId, sourceTalk = null) {
 
 function getFilteredVideos(search = parseSearch(state.search)) {
   const matchedIds = collectMatchedIdsFromStore(state.recommendation?.video, search);
-  if (matchedIds instanceof Set) {
-    return state.videos
-      .filter((video) => hitVideoBySearchIndex(video, matchedIds))
-      .slice()
-      .sort((a, b) => compareDateDesc(a.date, b.date));
-  }
   return state.videos
-    .filter((video) => hitVideo(video, search))
+    .filter((video) => {
+      if (matchedIds instanceof Set && hitVideoBySearchIndex(video, matchedIds)) return true;
+      return hitVideo(video, search);
+    })
     .slice()
     .sort((a, b) => compareDateDesc(a.date, b.date));
 }
 
 function getFilteredTalks(search = parseSearch(state.search)) {
   const matchedIds = collectMatchedIdsFromStore(state.recommendation?.talk, search);
-  if (matchedIds instanceof Set) {
-    let filteredByIndex = state.talks
-      .filter((talk) => hitTalkBySearchIndex(talk, matchedIds))
-      .slice()
-      .sort((a, b) => compareDateDesc(a.date, b.date));
-    if (state.randomTalkKeys) {
-      filteredByIndex = filteredByIndex.filter((talk) => state.randomTalkKeys.has(talk.key));
-    }
-    return filteredByIndex;
+  let candidates = state.talks;
+  if (state.randomTalkKeys) {
+    candidates = candidates.filter((talk) => state.randomTalkKeys.has(talk.key));
   }
-  let filtered = state.talks
-    .filter((talk) => hitTalk(talk, search))
+
+  // 検索一致フラグを先に計算し、タイトル一致フォールバックに再利用する。
+  const matchedTalks = [];
+  const videosWithContentHit = new Set();
+  const titleOnlyVideos = new Set();
+  candidates.forEach((talk) => {
+    const flags = getTalkMatchFlags(talk, search, matchedIds);
+    if (!flags.matched) return;
+
+    const videoKey = getTalkVideoKey(talk);
+    if (flags.contentMatched) {
+      matchedTalks.push(talk);
+      if (videoKey) videosWithContentHit.add(videoKey);
+      return;
+    }
+    if (flags.titleMatched && videoKey) {
+      titleOnlyVideos.add(videoKey);
+    }
+  });
+
+  if (!canSkipSearch(search) && search.mode === "normal" && titleOnlyVideos.size) {
+    const firstTalkByVideo = new Map();
+    const talksWithOrder = candidates.some((talk) => getTalkOrderValue(talk) !== null);
+    const sourceTalks = talksWithOrder
+      ? candidates.slice().sort((a, b) => {
+        const aOrder = getTalkOrderValue(a);
+        const bOrder = getTalkOrderValue(b);
+        if (aOrder === null && bOrder === null) return 0;
+        if (aOrder === null) return 1;
+        if (bOrder === null) return -1;
+        return aOrder - bOrder;
+      })
+      : candidates;
+
+    sourceTalks.forEach((talk) => {
+      const videoKey = getTalkVideoKey(talk);
+      if (!videoKey || firstTalkByVideo.has(videoKey)) return;
+      firstTalkByVideo.set(videoKey, talk);
+    });
+
+    const existingTalkKeys = new Set(matchedTalks.map((talk) => talk.key));
+    titleOnlyVideos.forEach((videoKey) => {
+      if (videosWithContentHit.has(videoKey)) return;
+      const fallbackTalk = firstTalkByVideo.get(videoKey);
+      if (!fallbackTalk || existingTalkKeys.has(fallbackTalk.key)) return;
+      matchedTalks.push(fallbackTalk);
+      existingTalkKeys.add(fallbackTalk.key);
+    });
+  }
+
+  return matchedTalks
     .slice()
     .sort((a, b) => compareDateDesc(a.date, b.date));
-
-  if (state.randomTalkKeys) {
-    filtered = filtered.filter((talk) => state.randomTalkKeys.has(talk.key));
-  }
-  return filtered;
 }
 
 function getDisplayedVideoOpenKeys(videos) {
@@ -1320,23 +1389,19 @@ function getDisplayedVideoOpenKeys(videos) {
 function updateToggleAllButton() {
   const search = parseSearch(state.search);
   let total = 0;
-  let openCount = 0;
   if (state.viewMode === "video") {
     const videos = getFilteredVideos(search);
     total = videos.length;
-    openCount = getDisplayedVideoOpenKeys(videos).size;
   } else if (state.viewMode === "talk") {
     const talks = getFilteredTalks(search);
     total = talks.length;
-    openCount = state.openTalkKeys.size;
   } else {
-    refs.toggleAll.textContent = "全て展開";
+    refs.toggleAll.textContent = "全て展開/折りたたむ";
     refs.toggleAll.disabled = true;
     return;
   }
   refs.toggleAll.disabled = false;
-  const allOpen = total > 0 && openCount === total;
-  refs.toggleAll.textContent = allOpen ? "全て折り畳み" : "全て展開";
+  refs.toggleAll.textContent = "全て展開/折りたたむ";
 }
 
 function updateTabs() {
@@ -1617,10 +1682,17 @@ function renderCards(videos) {
         sectionList.appendChild(item);
       });
     } else {
-      const placeholder = document.createElement("p");
-      placeholder.className = "detail-status";
-      placeholder.textContent = "クリックで詳細を読み込みます";
-      sectionList.appendChild(placeholder);
+      const placeholderWrap = document.createElement("p");
+      placeholderWrap.className = "detail-status";
+      const loadButton = document.createElement("button");
+      loadButton.type = "button";
+      loadButton.className = "detail-status-button";
+      loadButton.dataset.action = "load-video-detail";
+      loadButton.dataset.videoKey = video.key;
+      loadButton.disabled = !!video.detailLoading;
+      loadButton.textContent = video.detailLoading ? "読み込み中..." : "クリックで詳細を読み込みます";
+      placeholderWrap.appendChild(loadButton);
+      sectionList.appendChild(placeholderWrap);
     }
 
     const tags = document.createElement("div");
@@ -2227,6 +2299,22 @@ async function init() {
   refs.toggleAll.addEventListener("click", () => {
     toggleAllByMode();
     render();
+  });
+
+  refs.results.addEventListener("click", (event) => {
+    const loadButton = event.target.closest?.("[data-action='load-video-detail']");
+    if (!loadButton) return;
+    if (state.viewMode !== "video") return;
+    const videoKey = text(loadButton.dataset.videoKey);
+    const video = state.videos.find((item) => item.key === videoKey);
+    if (!video || video.detailLoading || Array.isArray(video.sections)) return;
+    loadButton.disabled = true;
+    loadButton.textContent = "読み込み中...";
+    void (async () => {
+      render();
+      await ensureVideoDetailsLoaded(video);
+      render();
+    })();
   });
 
   refs.randomSection.addEventListener("click", () => {

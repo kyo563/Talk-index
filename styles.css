@@ -325,6 +325,14 @@ body[data-ambient-tone="calm"] .card:focus-within {
   gap: 6px;
 }
 
+.detail-status-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  text-decoration: underline;
+}
+
 .section-item {
   border: 1px solid #edf2ed;
   border-radius: 8px;
