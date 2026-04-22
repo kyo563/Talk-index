@@ -21,6 +21,8 @@ class FavoriteVote:
     source_mode: str
     first_voted_at: str
     week_key: str
+    source_video_url: str
+    published_at: str
 
 
 def to_text(value: Any) -> str:
@@ -53,6 +55,16 @@ def parse_iso_datetime(value: str) -> datetime:
     return dt.astimezone(UTC)
 
 
+def parse_iso_datetime_optional(value: str) -> datetime | None:
+    raw = to_text(value)
+    if not raw:
+        return None
+    try:
+        return parse_iso_datetime(raw)
+    except ValueError:
+        return None
+
+
 def to_week_key_jst(value: str) -> str:
     utc_dt = parse_iso_datetime(value)
     jst_dt = utc_dt.astimezone(UTC) + JST_OFFSET
@@ -78,7 +90,62 @@ def normalize_vote_record(record: dict[str, Any]) -> FavoriteVote | None:
         source_mode=to_text(record.get("sourceMode")) or "unknown",
         first_voted_at=first_voted_at,
         week_key=week_key,
+        source_video_url=to_text(record.get("sourceVideoUrl")) or to_text(record.get("videoUrl")),
+        published_at=to_text(record.get("publishedAt")) or to_text(record.get("videoDate")),
     )
+
+
+def build_video_metadata_map(talks_payload: dict[str, Any], latest_payload: dict[str, Any]) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    talks = talks_payload.get("talks") if isinstance(talks_payload, dict) else []
+    if isinstance(talks, list):
+        for talk in talks:
+            if not isinstance(talk, dict):
+                continue
+            talk_date = to_text(talk.get("date"))
+            subsections = talk.get("subsections") if isinstance(talk.get("subsections"), list) else []
+            for subsection in subsections:
+                if not isinstance(subsection, dict):
+                    continue
+                url = to_text(subsection.get("videoUrl"))
+                video_id = to_text(subsection.get("videoId"))
+                if not video_id:
+                    from crawler.services.spreadsheet import extract_video_id_from_url
+                    video_id = extract_video_id_from_url(url)
+                if not video_id:
+                    continue
+                out[video_id] = {
+                    "title": to_text(subsection.get("videoTitle")),
+                    "url": url,
+                    "published_at": talk_date,
+                }
+
+    latest_items: list[Any] = []
+    if isinstance(latest_payload, dict):
+        for key in ("videos", "items", "data"):
+            values = latest_payload.get(key)
+            if isinstance(values, list):
+                latest_items = values
+                break
+    elif isinstance(latest_payload, list):
+        latest_items = latest_payload
+
+    for item in latest_items:
+        if not isinstance(item, dict):
+            continue
+        video_id = to_text(item.get("id")) or to_text(item.get("videoId"))
+        if not video_id:
+            from crawler.services.spreadsheet import extract_video_id_from_url
+            video_id = extract_video_id_from_url(to_text(item.get("url")))
+        if not video_id:
+            continue
+        existing = out.get(video_id, {})
+        out[video_id] = {
+            "title": to_text(item.get("title")) or to_text(existing.get("title")),
+            "url": to_text(item.get("url")) or to_text(existing.get("url")),
+            "published_at": to_text(item.get("date")) or to_text(item.get("publishedAt")) or to_text(existing.get("published_at")),
+        }
+    return out
 
 
 def stable_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
@@ -89,7 +156,12 @@ def stable_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def build_aggregates(votes: list[dict[str, Any]], *, now_utc: datetime | None = None) -> dict[str, Any]:
+def build_aggregates(
+    votes: list[dict[str, Any]],
+    *,
+    now_utc: datetime | None = None,
+    video_metadata_map: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
     ranking: dict[str, dict[str, Any]] = {}
     weekly_counts: defaultdict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
 
@@ -109,6 +181,9 @@ def build_aggregates(votes: list[dict[str, Any]], *, now_utc: datetime | None = 
                 "voteCount": 0,
                 "firstVotedAt": vote.first_voted_at,
                 "lastVotedAt": vote.first_voted_at,
+                "sourceVideoTitle": vote.video_title,
+                "sourceVideoUrl": vote.source_video_url,
+                "publishedAt": vote.published_at,
             }
         item = ranking[vote.heading_id]
         item["voteCount"] += 1
@@ -116,6 +191,12 @@ def build_aggregates(votes: list[dict[str, Any]], *, now_utc: datetime | None = 
             item["firstVotedAt"] = vote.first_voted_at
         if vote.first_voted_at and vote.first_voted_at > to_text(item.get("lastVotedAt")):
             item["lastVotedAt"] = vote.first_voted_at
+        if not to_text(item.get("sourceVideoTitle")) and vote.video_title:
+            item["sourceVideoTitle"] = vote.video_title
+        if not to_text(item.get("sourceVideoUrl")) and vote.source_video_url:
+            item["sourceVideoUrl"] = vote.source_video_url
+        if not to_text(item.get("publishedAt")) and vote.published_at:
+            item["publishedAt"] = vote.published_at
 
         week_group = weekly_counts[vote.week_key]
         if vote.heading_id not in week_group:
@@ -145,6 +226,40 @@ def build_aggregates(votes: list[dict[str, Any]], *, now_utc: datetime | None = 
 
     weekly_items = sorted(weekly_counts.get(previous_week_key, {}).values(), key=stable_sort_key)
 
+    metadata_map = video_metadata_map or {}
+    for item in all_ranking:
+        video_id = to_text(item.get("videoId"))
+        if not video_id:
+            continue
+        meta = metadata_map.get(video_id, {})
+        if not to_text(item.get("sourceVideoTitle")) and to_text(meta.get("title")):
+            item["sourceVideoTitle"] = to_text(meta.get("title"))
+        if not to_text(item.get("sourceVideoUrl")) and to_text(meta.get("url")):
+            item["sourceVideoUrl"] = to_text(meta.get("url"))
+        if not to_text(item.get("publishedAt")) and to_text(meta.get("published_at")):
+            item["publishedAt"] = to_text(meta.get("published_at"))
+
+    recent_upload_window_start = now_base - timedelta(days=7)
+    recent_upload_items: list[tuple[dict[str, Any], float]] = []
+    for item in all_ranking:
+        published_at = to_text(item.get("publishedAt"))
+        published_dt = parse_iso_datetime_optional(published_at)
+        if published_dt is None and published_at:
+            published_dt = parse_iso_datetime_optional(f"{published_at}T00:00:00Z")
+        if published_dt is None:
+            continue
+        if not (recent_upload_window_start <= published_dt <= now_base):
+            continue
+        recent_upload_items.append((item, published_dt.timestamp()))
+
+    recent_upload_items.sort(
+        key=lambda entry: (
+            -int(entry[0].get("voteCount", 0)),
+            -entry[1],
+            to_text(entry[0].get("headingId")),
+        )
+    )
+
     base_payload = {
         "generatedAt": now_base.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "source": "favorites/unique",
@@ -172,6 +287,10 @@ def build_aggregates(votes: list[dict[str, Any]], *, now_utc: datetime | None = 
             **base_payload,
             "weekKey": previous_week_key,
             "items": weekly_items[:5],
+        },
+        "recent_upload_recommendations": {
+            **base_payload,
+            "items": [entry[0] for entry in recent_upload_items[:5]],
         },
         "current_ranking": {
             **base_payload,

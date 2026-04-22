@@ -10,9 +10,11 @@ from crawler.services.spreadsheet import _get_or_create_sheet, extract_video_id_
 FAVORITES_CURRENT_RANKING_SHEET = "favorites_current_ranking"
 FAVORITES_HALL_OF_FAME_SHEET = "favorites_hall_of_fame"
 FAVORITES_RECENT_RECOMMENDATIONS_SHEET = "favorites_recent_recommendations"
+FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET = "favorites_recent_upload_recommendations"
 FAVORITES_DAILY_SNAPSHOTS_SHEET = "favorites_daily_snapshots"
 PUBLIC_FAVORITES_HALL_OF_FAME_SHEET = "殿堂入りトーク"
 PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET = "10日間のおすすめトーク"
+PUBLIC_FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET = "直近の動画のおすすめ"
 
 PUBLIC_FAVORITES_SHEET_HEADERS = ["動画投稿日", "動画タイトル", "大見出し", "得票数"]
 

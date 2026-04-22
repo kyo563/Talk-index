@@ -80,6 +80,38 @@ function buildRecentRecommendations(votes, generatedAtIso, windowDays = 10) {
   });
 }
 
+function parsePublishedAt(value) {
+  const raw = text(value);
+  if (!raw) return null;
+  const withTime = raw.includes("T") ? raw : `${raw}T00:00:00Z`;
+  const ms = Date.parse(withTime);
+  if (!Number.isFinite(ms)) return null;
+  return ms;
+}
+
+function buildRecentUploadRecommendations(rankingItems, generatedAtIso, windowDays = 7) {
+  const generatedAtMs = Date.parse(text(generatedAtIso));
+  if (!Number.isFinite(generatedAtMs)) return [];
+  const windowStartMs = generatedAtMs - windowDays * 24 * 60 * 60 * 1000;
+  const items = (Array.isArray(rankingItems) ? rankingItems : [])
+    .map((item) => {
+      const publishedAt = text(item?.publishedAt) || text(item?.videoDate);
+      const publishedAtMs = parsePublishedAt(publishedAt);
+      if (!Number.isFinite(publishedAtMs)) return null;
+      if (publishedAtMs < windowStartMs || publishedAtMs > generatedAtMs) return null;
+      return { ...item, publishedAt, publishedAtMs };
+    })
+    .filter(Boolean);
+
+  items.sort((a, b) => {
+    if (Number(b.voteCount || 0) !== Number(a.voteCount || 0)) return Number(b.voteCount || 0) - Number(a.voteCount || 0);
+    if (b.publishedAtMs !== a.publishedAtMs) return b.publishedAtMs - a.publishedAtMs;
+    return text(a.headingId).localeCompare(text(b.headingId));
+  });
+
+  return items.map(({ publishedAtMs, ...item }) => item);
+}
+
 function canonicalVoteMetadata(receivedAtIso, payloadTimestamp) {
   const firstVotedAt = text(receivedAtIso);
   const metadata = {
@@ -196,6 +228,9 @@ async function writeVote(request, env) {
     videoTitle: text(payload?.videoTitle),
     headingStart: text(payload?.headingStart),
     sourceMode: text(payload?.sourceMode) || "unknown",
+    sourceVideoUrl: text(payload?.sourceVideoUrl) || text(payload?.videoUrl),
+    sourceVideoTitle: text(payload?.sourceVideoTitle),
+    publishedAt: text(payload?.publishedAt),
     firstVotedAt: voteMeta.firstVotedAt,
     weekKey: voteMeta.weekKey,
     ipHash,
@@ -285,10 +320,12 @@ async function rebuildAggregates(request, env) {
 
   const generatedAt = new Date().toISOString();
   const recentItems = buildRecentRecommendations(votes, generatedAt, 10);
+  const recentUploadItems = buildRecentUploadRecommendations(sorted, generatedAt, 7);
 
   const allTime = { generatedAt, source: "favorites/unique", items: sorted };
   const hall = { generatedAt, source: "favorites/unique", items: sorted.slice(0, 3) };
   const recent = { generatedAt, source: "favorites/unique", items: recentItems.slice(0, 5) };
+  const recentUpload = { generatedAt, source: "favorites/unique", items: recentUploadItems.slice(0, 5) };
   const currentRanking = { generatedAt, source: "favorites/unique", items: sorted };
   const snapshotDate = jstDateFromIso(generatedAt);
   const dailySnapshot = { generatedAt, source: "favorites/unique", snapshotDate, items: sorted };
@@ -297,6 +334,7 @@ async function rebuildAggregates(request, env) {
     env.FAVORITES_BUCKET.put("favorites/aggregates/all_time.json", JSON.stringify(allTime)),
     env.FAVORITES_BUCKET.put("favorites/aggregates/hall_of_fame.json", JSON.stringify(hall)),
     env.FAVORITES_BUCKET.put("favorites/aggregates/recent_recommendations.json", JSON.stringify(recent)),
+    env.FAVORITES_BUCKET.put("favorites/aggregates/recent_upload_recommendations.json", JSON.stringify(recentUpload)),
     env.FAVORITES_BUCKET.put("favorites/exports/current_ranking.json", JSON.stringify(currentRanking)),
     env.FAVORITES_BUCKET.put(`favorites/exports/daily_snapshot/${snapshotDate}.json`, JSON.stringify(dailySnapshot)),
   ]);
@@ -349,6 +387,9 @@ export default {
     if (request.method === "GET" && url.pathname === "/favorites/current_ranking.json") {
       return readAggregate(request, env, "favorites/exports/current_ranking.json");
     }
+    if (request.method === "GET" && url.pathname === "/favorites/recent_upload_recommendations.json") {
+      return readAggregate(request, env, "favorites/aggregates/recent_upload_recommendations.json");
+    }
 
     return jsonResponse({ status: "error", message: "not found" }, 404, {}, request, env);
   },
@@ -360,6 +401,7 @@ export {
   weekKeyJstFromIso,
   previousCompletedWeekKeyFromIso,
   buildRecentRecommendations,
+  buildRecentUploadRecommendations,
   hashWithSecret,
   canonicalVoteMetadata,
 };

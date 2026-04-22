@@ -142,6 +142,7 @@ npm run ci:build
   - `favorites/aggregates/all_time.json`
   - `favorites/aggregates/hall_of_fame.json`
   - `favorites/aggregates/recent_recommendations.json`
+  - `favorites/aggregates/recent_upload_recommendations.json`
   - `favorites/aggregates/weekly/<weekKey>.json`
 - エクスポート（シート同期しやすい形式）
   - `favorites/exports/current_ranking.json`
@@ -161,6 +162,7 @@ npm run ci:build
 - `payload.timestamp` は集計に使わず、必要時のみ `clientTimestamp` として保持します
 - hash 方式は Python / Worker 共通で `HMAC-SHA256(secret, "${scope}:${value}")` です
 - `recent_recommendations` は **generatedAt基準の直近10日間** の投票イベントを再集計して参照します
+- `recent_upload_recommendations` は **generatedAt基準の過去7日以内に公開された動画**に属する大見出しを、累計票で上位化します
 
 ### favorites の実装位置
 
@@ -178,6 +180,7 @@ npm run ci:build
 - `sendFavoriteVote(baseUrl, payload)`
 - `fetchHallOfFame(baseUrl)`
 - `fetchRecentRecommendations(baseUrl)`
+- `fetchRecentUploadRecommendations(baseUrl)`
 - `fetchFavoriteRanking(baseUrl)`
 
 JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates` など）を使い、favorites 側で独自の汎用JSON fetch helperは持たない方針です。
@@ -199,8 +202,8 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
   - 既にサーバ成功済みの heading は再送しない
 - お気に入りタブの3カード:
   - お気に入りリスト（localStorage基準）
-  - 最近のおすすめ（`/favorites/recent_recommendations.json`）
-  - 殿堂入り（`/favorites/hall_of_fame.json`）
+  - 直近の動画のおすすめ（`/favorites/recent_upload_recommendations.json`、上位3件）
+  - 殿堂入り（`/favorites/hall_of_fame.json`、上位3件）
 
 
 ### favorites ミラー同期（R2 → Spreadsheet）
@@ -212,6 +215,7 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
   - `favorites/exports/current_ranking.json`
   - `favorites/aggregates/hall_of_fame.json`
   - `favorites/aggregates/recent_recommendations.json`
+  - `favorites/aggregates/recent_upload_recommendations.json`
   - `favorites/exports/daily_snapshot/latest.json` または `favorites/exports/daily_snapshot/YYYY-MM-DD.json`
 
 #### 反映先シート
@@ -219,10 +223,12 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
 - `favorites_current_ranking`（毎回全置換）
 - `favorites_hall_of_fame`（毎回全置換、上位3件）
 - `favorites_recent_recommendations`（毎回全置換、generatedAt基準の直近10日間上位5件）
+- `favorites_recent_upload_recommendations`（毎回全置換、generatedAt基準の過去7日以内公開動画を累計票で上位5件）
 - `favorites_daily_snapshots`（`snapshotDate + headingId` をキーに upsert / 履歴保持）
 - 公開用別スプレッドシート（`PUBLIC_FAVORITES_SPREADSHEET_ID`）:
   - `殿堂入りトーク`（毎回全置換）
   - `10日間のおすすめトーク`（毎回全置換）
+  - `直近の動画のおすすめ`（毎回全置換）
 
 #### 列
 

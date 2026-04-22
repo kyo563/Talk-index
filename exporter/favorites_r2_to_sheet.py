@@ -11,8 +11,10 @@ from crawler.services.favorites_mirror import (
     FAVORITES_DAILY_SNAPSHOTS_SHEET,
     FAVORITES_HALL_OF_FAME_SHEET,
     FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
+    FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET,
     PUBLIC_FAVORITES_HALL_OF_FAME_SHEET,
     PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
+    PUBLIC_FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET,
     build_heading_video_candidates_map,
     build_heading_video_title_map,
     build_public_sheet_rows_from_items,
@@ -28,6 +30,7 @@ from crawler.services.spreadsheet import build_gspread_client, normalize_spreads
 CURRENT_RANKING_KEY = "favorites/exports/current_ranking.json"
 HALL_OF_FAME_KEY = "favorites/aggregates/hall_of_fame.json"
 RECENT_RECOMMENDATIONS_KEY = "favorites/aggregates/recent_recommendations.json"
+RECENT_UPLOAD_RECOMMENDATIONS_KEY = "favorites/aggregates/recent_upload_recommendations.json"
 DAILY_SNAPSHOT_PREFIX = "favorites/exports/daily_snapshot/"
 DAILY_SNAPSHOT_LATEST_KEY = f"{DAILY_SNAPSHOT_PREFIX}latest.json"
 TALKS_JSON_KEY = "index/talks.json"
@@ -145,6 +148,7 @@ def main() -> None:
     current_payload = _load_json_required(s3, bucket, CURRENT_RANKING_KEY)
     hall_payload = _load_json_required(s3, bucket, HALL_OF_FAME_KEY)
     recent_payload = _load_json_required(s3, bucket, RECENT_RECOMMENDATIONS_KEY)
+    recent_upload_payload = _load_json_required(s3, bucket, RECENT_UPLOAD_RECOMMENDATIONS_KEY)
     talks_payload = _load_json_optional(s3, bucket, TALKS_JSON_KEY) or {}
     latest_payload = _load_json_optional(s3, bucket, LATEST_JSON_KEY) or {}
 
@@ -173,6 +177,12 @@ def main() -> None:
         heading_title_map=heading_title_map,
         default_week_key=recent_default_week,
     )
+    recent_upload_rows = build_sheet_rows_from_items(
+        payload=recent_upload_payload,
+        aggregate_type="recent_upload_recommendations",
+        source_json_url=RECENT_UPLOAD_RECOMMENDATIONS_KEY,
+        heading_title_map=heading_title_map,
+    )
 
     replace_sheet_rows(
         client=gspread_client,
@@ -192,6 +202,12 @@ def main() -> None:
         worksheet_name=FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
         rows=recent_rows,
     )
+    replace_sheet_rows(
+        client=gspread_client,
+        spreadsheet_id=spreadsheet_id,
+        worksheet_name=FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET,
+        rows=recent_upload_rows,
+    )
 
     public_hall_rows = build_public_sheet_rows_from_items(
         payload=hall_payload,
@@ -200,6 +216,11 @@ def main() -> None:
     )
     public_recent_rows = build_public_sheet_rows_from_items(
         payload=recent_payload,
+        video_metadata_map=video_metadata_map,
+        heading_video_candidates_map=heading_video_candidates_map,
+    )
+    public_recent_upload_rows = build_public_sheet_rows_from_items(
+        payload=recent_upload_payload,
         video_metadata_map=video_metadata_map,
         heading_video_candidates_map=heading_video_candidates_map,
     )
@@ -214,6 +235,12 @@ def main() -> None:
         spreadsheet_id=public_favorites_spreadsheet_id,
         worksheet_name=PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
         rows=public_recent_rows,
+    )
+    replace_public_sheet_rows(
+        client=gspread_client,
+        spreadsheet_id=public_favorites_spreadsheet_id,
+        worksheet_name=PUBLIC_FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET,
+        rows=public_recent_upload_rows,
     )
 
     daily_payloads = _load_daily_snapshots(s3, bucket)
@@ -241,8 +268,8 @@ def main() -> None:
 
     print(
         "favorites mirror done: "
-        f"current={len(current_rows)}, hall={len(hall_rows)}, recent={len(recent_rows)}, "
-        f"public_hall={len(public_hall_rows)}, public_recent={len(public_recent_rows)}, "
+        f"current={len(current_rows)}, hall={len(hall_rows)}, recent={len(recent_rows)}, recent_upload={len(recent_upload_rows)}, "
+        f"public_hall={len(public_hall_rows)}, public_recent={len(public_recent_rows)}, public_recent_upload={len(public_recent_upload_rows)}, "
         f"daily_rows={len(daily_rows)}, daily_updated={updated_count}, daily_appended={appended_count}"
     )
 

@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 
 import boto3
 
-from crawler.services.favorites import build_aggregates, dump_json
+from crawler.services.favorites import build_aggregates, build_video_metadata_map, dump_json
+
+TALKS_JSON_KEY = "index/talks.json"
+LATEST_JSON_KEY = "index/latest.json"
 
 
 def _require_env(name: str) -> str:
@@ -54,6 +57,20 @@ def _put_json(s3, bucket: str, key: str, payload: dict[str, object]) -> None:
     )
 
 
+def _read_json_optional(s3, bucket: str, key: str) -> dict[str, object] | list[object]:
+    try:
+        body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+    except Exception:
+        return {}
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(payload, (dict, list)):
+        return payload
+    return {}
+
+
 def main() -> None:
     account_id = _require_env("R2_ACCOUNT_ID")
     access_key_id = _require_env("R2_ACCESS_KEY_ID")
@@ -69,7 +86,13 @@ def main() -> None:
     )
 
     votes = _read_unique_votes(s3, bucket)
-    aggregates = build_aggregates(votes, now_utc=datetime.now(UTC))
+    talks_payload = _read_json_optional(s3, bucket, TALKS_JSON_KEY)
+    latest_payload = _read_json_optional(s3, bucket, LATEST_JSON_KEY)
+    video_metadata_map = build_video_metadata_map(
+        talks_payload if isinstance(talks_payload, dict) else {},
+        latest_payload if isinstance(latest_payload, (dict, list)) else {},
+    )
+    aggregates = build_aggregates(votes, now_utc=datetime.now(UTC), video_metadata_map=video_metadata_map)
 
     _put_json(s3, bucket, "favorites/aggregates/all_time.json", aggregates["all_time"])
     _put_json(s3, bucket, "favorites/aggregates/hall_of_fame.json", aggregates["hall_of_fame"])
@@ -78,6 +101,12 @@ def main() -> None:
         bucket,
         "favorites/aggregates/recent_recommendations.json",
         aggregates["recent_recommendations"],
+    )
+    _put_json(
+        s3,
+        bucket,
+        "favorites/aggregates/recent_upload_recommendations.json",
+        aggregates["recent_upload_recommendations"],
     )
 
     for week_key, payload in aggregates["weekly"].items():

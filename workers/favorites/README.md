@@ -12,6 +12,7 @@
   - R2 の `favorites/unique/` を再集計して read model を更新
 - `GET /favorites/hall_of_fame.json`
 - `GET /favorites/recent_recommendations.json`
+- `GET /favorites/recent_upload_recommendations.json`
 - `GET /favorites/current_ranking.json`
 
 ## Bindings / Secrets

@@ -5,6 +5,7 @@ import {
   jstDateFromIso,
   weekKeyJstFromIso,
   buildRecentRecommendations,
+  buildRecentUploadRecommendations,
   hashWithSecret,
   canonicalVoteMetadata,
 } from './worker.mjs';
@@ -52,6 +53,25 @@ test('recent_recommendations の tie-break は firstVotedAt → headingId', () =
 
   const items = buildRecentRecommendations(votes, generatedAt, 10);
   assert.deepEqual(items.map((item) => item.headingId), ['a-id', 'b-id']);
+});
+
+test('recent_upload_recommendations は1週間以内の公開動画のみ対象', () => {
+  const generatedAt = '2026-04-22T12:00:00Z';
+  const items = buildRecentUploadRecommendations([
+    { headingId: 'in', voteCount: 3, publishedAt: '2026-04-18' },
+    { headingId: 'out', voteCount: 9, publishedAt: '2026-04-01' },
+  ], generatedAt, 7);
+  assert.deepEqual(items.map((item) => item.headingId), ['in']);
+});
+
+test('recent_upload_recommendations の tie-break は publishedAt desc → headingId', () => {
+  const generatedAt = '2026-04-22T12:00:00Z';
+  const items = buildRecentUploadRecommendations([
+    { headingId: 'b-id', voteCount: 2, publishedAt: '2026-04-20' },
+    { headingId: 'a-id', voteCount: 2, publishedAt: '2026-04-20' },
+    { headingId: 'newer', voteCount: 2, publishedAt: '2026-04-21' },
+  ], generatedAt, 7);
+  assert.deepEqual(items.map((item) => item.headingId), ['newer', 'a-id', 'b-id']);
 });
 
 test('daily snapshot の JST 日付', () => {

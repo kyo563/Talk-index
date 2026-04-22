@@ -1,5 +1,11 @@
 import { createInvalidJsonShapeError, createTargetFetchError, fetchJsonFromCandidates } from "./src/data/fetch-json.js";
-import { fetchFavoriteRanking, fetchHallOfFame, fetchRecentRecommendations, sendFavoriteVote as sendFavoriteVoteRequest } from "./src/features/favorites.js";
+import {
+  fetchFavoriteRanking,
+  fetchHallOfFame,
+  fetchRecentRecommendations,
+  fetchRecentUploadRecommendations,
+  sendFavoriteVote as sendFavoriteVoteRequest,
+} from "./src/features/favorites.js";
 import { getModeMessage } from "./src/ui/render-messages.js";
 
 const configuredDataUrl = text(window.TALK_INDEX_DATA_URL);
@@ -62,6 +68,7 @@ const state = {
   unsyncedFavoriteHeadingIds: new Set(),
   favoritePanelOpenKeys: new Set(),
   favoritesRecent: null,
+  favoritesRecentUpload: null,
   favoritesHall: null,
   favoritesCurrentRanking: null,
   favoritesRankingStatus: "idle",
@@ -1272,6 +1279,7 @@ async function sendFavoriteVote(payload) {
 async function fetchFavoritesAggregate(kind) {
   const loaders = {
     recent: fetchRecentRecommendations,
+    recentUpload: fetchRecentUploadRecommendations,
     hall: fetchHallOfFame,
     ranking: fetchFavoriteRanking,
   };
@@ -1340,12 +1348,14 @@ async function loadFavoritesDataIfNeeded() {
   state.favoritesDataError = "";
   render();
   try {
-    const [recent, hall, ranking] = await Promise.all([
+    const [recent, recentUpload, hall, ranking] = await Promise.all([
       fetchFavoritesAggregate("recent"),
+      fetchFavoritesAggregate("recentUpload"),
       fetchFavoritesAggregate("hall"),
       fetchFavoritesAggregate("ranking"),
     ]);
     state.favoritesRecent = recent;
+    state.favoritesRecentUpload = recentUpload;
     state.favoritesHall = hall;
     state.favoritesCurrentRanking = ranking;
     state.favoritesRankingStatus = "ready";
@@ -2003,18 +2013,17 @@ function renderFavoritesTab() {
     .map((headingId) => findTalkByHeadingId(headingId))
     .filter(Boolean);
 
-  const recentItems = Array.isArray(state.favoritesRecent?.items) ? state.favoritesRecent.items : [];
+  const recentItems = Array.isArray(state.favoritesRecentUpload?.items) ? state.favoritesRecentUpload.items : [];
   const hallItems = Array.isArray(state.favoritesHall?.items) ? state.favoritesHall.items : [];
-  const recentTalks = recentItems.map((item) => findTalkByHeadingId(getHeadingIdFromObject(item))).filter(Boolean);
-  const hallTalks = hallItems.map((item) => findTalkByHeadingId(getHeadingIdFromObject(item))).filter(Boolean);
+  const recentTalks = recentItems.map((item) => findTalkByHeadingId(getHeadingIdFromObject(item))).filter(Boolean).slice(0, RECOMMEND_LIMIT);
+  const hallTalks = hallItems.map((item) => findTalkByHeadingId(getHeadingIdFromObject(item))).filter(Boolean).slice(0, RECOMMEND_LIMIT);
 
   const favoriteMeta = favoriteTalks.length ? `${favoriteTalks.length}件` : "0件";
   refs.results.appendChild(createFavoritePanel("お気に入りリスト", "mine", favoriteTalks, { meta: favoriteMeta, showMeta: true }));
 
-  refs.results.appendChild(createFavoritePanel("最近のおすすめ", "recent", recentTalks, { showMeta: false }));
+  refs.results.appendChild(createFavoritePanel("直近の動画のおすすめ", "recent-upload", recentTalks, { showMeta: false }));
 
-  const hallDisplayTalks = hallTalks.slice(0, 5);
-  refs.results.appendChild(createFavoritePanel("殿堂入り", "hall", hallDisplayTalks, { showMeta: false }));
+  refs.results.appendChild(createFavoritePanel("殿堂入り", "hall", hallTalks, { showMeta: false }));
 
 }
 

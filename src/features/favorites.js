@@ -47,6 +47,16 @@ export function fetchRecentRecommendations(baseUrl) {
   );
 }
 
+export function fetchRecentUploadRecommendations(baseUrl) {
+  return fetchJsonFromCandidates(
+    buildFavoritesReadCandidates(baseUrl, [
+      "/favorites/aggregates/recent_upload_recommendations.json",
+      "/favorites/recent_upload_recommendations.json",
+    ]),
+    { targetName: "favorites aggregate(recent_upload)" },
+  );
+}
+
 export function fetchFavoriteRanking(baseUrl) {
   return fetchJsonFromCandidates(
     buildFavoritesReadCandidates(baseUrl, ["/favorites/exports/current_ranking.json", "/favorites/current_ranking.json"]),

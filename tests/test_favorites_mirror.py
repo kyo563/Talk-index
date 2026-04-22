@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from crawler.services.favorites_mirror import (
     FAVORITES_SHEET_HEADERS,
     PUBLIC_FAVORITES_SHEET_HEADERS,
+    PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
+    PUBLIC_FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET,
     build_heading_video_candidates_map,
     build_heading_video_title_map,
     build_public_sheet_rows_from_items,
@@ -77,6 +79,10 @@ class FakeClient:
 class FavoritesMirrorTests(unittest.TestCase):
     def test_public_headers_are_japanese(self):
         self.assertEqual(PUBLIC_FAVORITES_SHEET_HEADERS, ["動画投稿日", "動画タイトル", "大見出し", "得票数"])
+
+    def test_public_sheet_names_include_recent_upload(self):
+        self.assertEqual(PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET, "10日間のおすすめトーク")
+        self.assertEqual(PUBLIC_FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET, "直近の動画のおすすめ")
 
     def test_build_video_metadata_map_resolves_from_talks_and_latest(self):
         talks_payload = {
