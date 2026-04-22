@@ -1,3 +1,5 @@
+import { fetchJsonFromCandidates } from "./src/data/fetch-json.js";
+
 const configuredDataUrl = text(window.TALK_INDEX_DATA_URL);
 const DATA_URL_CANDIDATES = configuredDataUrl
   ? [configuredDataUrl]
@@ -801,23 +803,16 @@ async function loadSearchIndexIfNeeded() {
   state.searchIndexError = "";
 
   state.searchIndexPromise = (async () => {
-    let lastError = "";
-    for (const url of SEARCH_INDEX_URL_CANDIDATES) {
-      try {
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        state.recommendation = buildRecommendationStoreFromSearchIndex(data);
-        state.searchIndexStatus = "ready";
-        return state.recommendation;
-      } catch (error) {
-        lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
-      }
+    try {
+      const data = await fetchJsonFromCandidates(SEARCH_INDEX_URL_CANDIDATES, { targetName: "search_index" });
+      state.recommendation = buildRecommendationStoreFromSearchIndex(data);
+      state.searchIndexStatus = "ready";
+      return state.recommendation;
+    } catch (error) {
+      state.searchIndexStatus = "error";
+      state.searchIndexError = error instanceof Error ? error.message : String(error);
+      return null;
     }
-
-    state.searchIndexStatus = "error";
-    state.searchIndexError = lastError || "search_index.json の読込に失敗しました";
-    return null;
   })();
 
   try {
@@ -1195,32 +1190,30 @@ async function sendFavoriteVote(payload) {
   throw new Error(lastError || "favorites vote 送信に失敗しました");
 }
 
-async function fetchFavoritesAggregate(path) {
-  let lastError = "";
-  for (const baseUrl of FAVORITES_READ_BASE_URL_CANDIDATES) {
-    try {
-      const response = await fetch(`${text(baseUrl).replace(/\/$/, "")}${path}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
-    } catch (error) {
-      lastError = `${baseUrl}${path}: ${error instanceof Error ? error.message : String(error)}`;
-    }
-  }
-  throw new Error(lastError || `${path} の取得に失敗しました`);
+async function fetchFavoritesAggregate(path, targetName = "favorites aggregate") {
+  const candidates = FAVORITES_READ_BASE_URL_CANDIDATES
+    .map((baseUrl) => `${text(baseUrl).replace(/\/$/, "")}${path}`)
+    .filter(Boolean);
+  return fetchJsonFromCandidates(candidates, { targetName });
 }
 
 async function fetchFavoritesAggregateFromCandidates(kind, paths) {
   let lastError = "";
+  const targetName = `favorites aggregate(${kind})`;
   for (const path of (Array.isArray(paths) ? paths : [])) {
     try {
-      return await fetchFavoritesAggregate(path);
+      return await fetchFavoritesAggregate(path, targetName);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       lastError = message;
       console.warn(`[favorites] ${kind} aggregate fetch failed: ${path}`, message);
     }
   }
-  throw new Error(lastError || `${kind} 集計データの取得に失敗しました`);
+  if (lastError) {
+    const reason = lastError.includes(": ") ? lastError.split(": ").slice(1).join(": ") : lastError;
+    throw new Error(`${targetName} の取得に失敗しました: ${reason || "不明なエラー"}`);
+  }
+  throw new Error(`${targetName} の取得に失敗しました: 不明なエラー`);
 }
 
 async function syncFavoriteVote(headingId, sourceTalk = null) {
@@ -1910,50 +1903,38 @@ function render() {
 }
 
 async function fetchInitialVideos() {
-  let lastError = "";
   updateServerStatus("loading");
-
-  for (const url of DATA_URL_CANDIDATES) {
-    try {
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const videos = Array.isArray(data?.videos) ? data.videos : null;
-      if (Array.isArray(videos)) {
-        return videos.map((video) => normalizeVideoSummary(video));
-      }
-
-      const rows = Array.isArray(data) ? data : (Array.isArray(data.items) ? data.items : data.rows);
-      if (!Array.isArray(rows)) throw new Error("JSON形式が不正です");
-      const normalized = [];
-      rows.forEach((raw) => {
-        const row = normalizeRow(raw || {});
-        if (!row.title || !row.section) {
-          state.skippedRows += 1;
-          return;
-        }
-        normalized.push(row);
-      });
-      return attachDisplayTags(groupVideos(normalized)).map((video) => ({
-        ...normalizeVideoSummary({
-          id: video.key,
-          key: video.key,
-          title: video.title,
-          date: video.date,
-          url: video.url,
-          tags: video.tags,
-          section_count: video.sections.length,
-          thumb: video.thumb,
-          sections: video.sections,
-        }),
-        displayTags: video.displayTags,
-      }));
-    } catch (error) {
-      lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
-    }
+  const data = await fetchJsonFromCandidates(DATA_URL_CANDIDATES, { targetName: "latest" });
+  const videos = Array.isArray(data?.videos) ? data.videos : null;
+  if (Array.isArray(videos)) {
+    return videos.map((video) => normalizeVideoSummary(video));
   }
 
-  throw new Error(`データ取得に失敗しました。${lastError}`);
+  const rows = Array.isArray(data) ? data : (Array.isArray(data.items) ? data.items : data.rows);
+  if (!Array.isArray(rows)) throw new Error("JSON形式が不正です");
+  const normalized = [];
+  rows.forEach((raw) => {
+    const row = normalizeRow(raw || {});
+    if (!row.title || !row.section) {
+      state.skippedRows += 1;
+      return;
+    }
+    normalized.push(row);
+  });
+  return attachDisplayTags(groupVideos(normalized)).map((video) => ({
+    ...normalizeVideoSummary({
+      id: video.key,
+      key: video.key,
+      title: video.title,
+      date: video.date,
+      url: video.url,
+      tags: video.tags,
+      section_count: video.sections.length,
+      thumb: video.thumb,
+      sections: video.sections,
+    }),
+    displayTags: video.displayTags,
+  }));
 }
 
 function buildDetailUrlCandidates(detailId) {
@@ -1979,25 +1960,19 @@ async function ensureVideoDetailsLoaded(video) {
   video.detailLoading = true;
   video.detailError = "";
   const promise = (async () => {
-    let lastError = "";
-    for (const url of buildDetailUrlCandidates(detailId)) {
-      try {
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const sections = Array.isArray(data?.sections) ? data.sections : [];
-        state.videoDetailsCache.set(detailId, sections);
-        video.sections = sections;
-        video.sectionCount = sections.length;
-        video.detailLoading = false;
-        return;
-      } catch (error) {
-        lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
-      }
+    try {
+      const data = await fetchJsonFromCandidates(buildDetailUrlCandidates(detailId), { targetName: "video-details" });
+      const sections = Array.isArray(data?.sections) ? data.sections : [];
+      state.videoDetailsCache.set(detailId, sections);
+      video.sections = sections;
+      video.sectionCount = sections.length;
+      video.detailLoading = false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      video.detailLoading = false;
+      video.detailError = "詳細の読込に失敗しました";
+      refs.notice.textContent = `一部データの読込に失敗しました（${message}）`;
     }
-    video.detailLoading = false;
-    video.detailError = "詳細の読込に失敗しました";
-    refs.notice.textContent = `一部データの読込に失敗しました（${lastError}）`;
   })();
 
   state.videoDetailsPromises.set(detailId, promise);
@@ -2009,28 +1984,22 @@ async function ensureVideoDetailsLoaded(video) {
 }
 
 async function loadTalksFromLegacyLatest() {
-  let lastError = "";
-  for (const url of DATA_URL_CANDIDATES) {
-    try {
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const rows = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : data?.rows);
-      if (!Array.isArray(rows)) continue;
-
-      const normalized = [];
-      rows.forEach((raw) => {
-        const row = normalizeRow(raw || {});
-        if (!row.title || !row.section) return;
-        normalized.push(row);
-      });
-      if (!normalized.length) continue;
-      return groupTalks(normalized);
-    } catch (error) {
-      lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
-    }
+  const data = await fetchJsonFromCandidates(DATA_URL_CANDIDATES, { targetName: "latest" });
+  const rows = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : data?.rows);
+  if (!Array.isArray(rows)) {
+    throw new Error("latest の取得に失敗しました: 不明なエラー");
   }
-  throw new Error(lastError || "latest.json からのフォールバック読込に失敗しました");
+
+  const normalized = [];
+  rows.forEach((raw) => {
+    const row = normalizeRow(raw || {});
+    if (!row.title || !row.section) return;
+    normalized.push(row);
+  });
+  if (!normalized.length) {
+    throw new Error("latest の取得に失敗しました: 不明なエラー");
+  }
+  return groupTalks(normalized);
 }
 
 async function loadTalksIfNeeded() {
@@ -2042,23 +2011,19 @@ async function loadTalksIfNeeded() {
   render();
   state.talksPromise = (async () => {
     let lastError = "";
-    for (const url of TALKS_URL_CANDIDATES) {
-      try {
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const talks = Array.isArray(data?.talks)
-          ? data.talks
-          : (Array.isArray(data) ? data : (() => { throw new Error("talks.json の形式が不正です"); })());
-        state.talks = talks;
-        state.talkRecommendationCache = new Map();
-        state.talkSearchDocuments = null;
-        state.talksStatus = "ready";
-        state.talksError = "";
-        return state.talks;
-      } catch (error) {
-        lastError = `${url}: ${error instanceof Error ? error.message : String(error)}`;
-      }
+    try {
+      const data = await fetchJsonFromCandidates(TALKS_URL_CANDIDATES, { targetName: "talks" });
+      const talks = Array.isArray(data?.talks)
+        ? data.talks
+        : (Array.isArray(data) ? data : (() => { throw new Error("talks.json の形式が不正です"); })());
+      state.talks = talks;
+      state.talkRecommendationCache = new Map();
+      state.talkSearchDocuments = null;
+      state.talksStatus = "ready";
+      state.talksError = "";
+      return state.talks;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
     }
     try {
       const fallbackTalks = await loadTalksFromLegacyLatest();
