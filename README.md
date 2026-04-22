@@ -113,6 +113,8 @@ npm run ci:build
 - R2 アップロード系:  
   `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`  
   + `SPREADSHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON` などシート参照に必要な値
+- favorites ミラー系（追加）:
+  `PUBLIC_FAVORITES_SPREADSHEET_ID`（公開用 favorites ミラー出力先）
 
 ## R2 / JSON 出力
 
@@ -218,11 +220,15 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
 - `favorites_hall_of_fame`（毎回全置換、上位3件）
 - `favorites_recent_recommendations`（毎回全置換、generatedAt基準の直近10日間上位5件）
 - `favorites_daily_snapshots`（`snapshotDate + headingId` をキーに upsert / 履歴保持）
+- 公開用別スプレッドシート（`PUBLIC_FAVORITES_SPREADSHEET_ID`）:
+  - `殿堂入りトーク`（毎回全置換）
+  - `10日間のおすすめトーク`（毎回全置換）
 
 #### 列
 
 - 必須: `snapshotDate`, `weekKey`, `headingId`, `headingText`, `videoId`, `sourceVideoTitle`, `voteCount`, `rank`, `firstVotedAt`, `lastVotedAt`, `aggregateType`
 - 追加: `generatedAt`, `sourceJsonUrl`, `note`
+- 公開用シート列（日本語固定）: `動画投稿日`, `動画タイトル`（リンク付き）, `大見出し`, `得票数`
 
 #### 実行方法
 

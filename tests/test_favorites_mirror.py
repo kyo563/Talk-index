@@ -3,9 +3,13 @@ from datetime import UTC, datetime
 
 from crawler.services.favorites_mirror import (
     FAVORITES_SHEET_HEADERS,
+    PUBLIC_FAVORITES_SHEET_HEADERS,
     build_heading_video_title_map,
+    build_public_sheet_rows_from_items,
     build_sheet_rows_from_items,
+    build_video_metadata_map,
     previous_week_key_jst,
+    replace_public_sheet_rows,
     upsert_daily_snapshot_rows,
 )
 from exporter import favorites_r2_to_sheet
@@ -70,6 +74,81 @@ class FakeClient:
 
 
 class FavoritesMirrorTests(unittest.TestCase):
+    def test_public_headers_are_japanese(self):
+        self.assertEqual(PUBLIC_FAVORITES_SHEET_HEADERS, ["動画投稿日", "動画タイトル", "大見出し", "得票数"])
+
+    def test_build_video_metadata_map_resolves_from_talks_and_latest(self):
+        talks_payload = {
+            "talks": [
+                {
+                    "date": "2026-04-20",
+                    "subsections": [
+                        {"videoTitle": "talk-title", "videoUrl": "https://www.youtube.com/watch?v=AAAAAAAAAAA"}
+                    ],
+                }
+            ]
+        }
+        latest_payload = {
+            "videos": [
+                {
+                    "id": "AAAAAAAAAAA",
+                    "title": "latest-title",
+                    "url": "https://youtu.be/AAAAAAAAAAA",
+                    "date": "2026-04-21",
+                }
+            ]
+        }
+        meta = build_video_metadata_map(talks_payload, latest_payload)
+        self.assertEqual(meta["AAAAAAAAAAA"]["title"], "latest-title")
+        self.assertEqual(meta["AAAAAAAAAAA"]["published_date"], "2026-04-21")
+
+    def test_public_rows_include_only_4_columns_with_hyperlink_and_sort(self):
+        meta = {
+            "BBBBBBBBBBB": {
+                "title": '動画"2',
+                "url": "https://www.youtube.com/watch?v=BBBBBBBBBBB",
+                "published_date": "2026-04-20",
+            },
+            "AAAAAAAAAAA": {
+                "title": "動画1",
+                "url": "https://www.youtube.com/watch?v=AAAAAAAAAAA",
+                "published_date": "2026-04-21",
+            },
+        }
+        payload = {
+            "items": [
+                {"videoId": "BBBBBBBBBBB", "headingTitle": "見出しB", "voteCount": 2},
+                {"videoId": "AAAAAAAAAAA", "headingTitle": "見出しA", "voteCount": 2},
+            ]
+        }
+        rows = build_public_sheet_rows_from_items(payload=payload, video_metadata_map=meta)
+        self.assertEqual(len(rows[0]), 4)
+        self.assertEqual(rows[0][0], "2026-04-21")
+        self.assertTrue(rows[0][1].startswith('=HYPERLINK("https://www.youtube.com/watch?v=AAAAAAAAAAA"'))
+        self.assertIn('動画""2', rows[1][1])
+
+    def test_replace_public_sheet_rows_uses_user_entered(self):
+        class PublicSheet(FakeWorksheet):
+            def __init__(self):
+                super().__init__()
+                self.last_value_input_option = ""
+
+            def update(self, a1, values, value_input_option="RAW"):
+                self.last_value_input_option = value_input_option
+                super().update(a1, values, value_input_option=value_input_option)
+
+        sheet = PublicSheet()
+        client = FakeClient(sheet)
+        replace_public_sheet_rows(
+            client=client,
+            spreadsheet_id="dummy",
+            worksheet_name="殿堂入りトーク",
+            rows=[["2026-04-21", '=HYPERLINK("https://example.com","タイトル")', "見出し", "3"]],
+        )
+        self.assertEqual(sheet.last_value_input_option, "USER_ENTERED")
+        self.assertEqual(sheet.values[0], PUBLIC_FAVORITES_SHEET_HEADERS)
+        self.assertEqual(len(sheet.values[1]), 4)
+
     def test_build_rows_with_source_video_title_resolution_by_video_id(self):
         talks_payload = {
             "talks": [

@@ -11,9 +11,14 @@ from crawler.services.favorites_mirror import (
     FAVORITES_DAILY_SNAPSHOTS_SHEET,
     FAVORITES_HALL_OF_FAME_SHEET,
     FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
+    PUBLIC_FAVORITES_HALL_OF_FAME_SHEET,
+    PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
     build_heading_video_title_map,
+    build_public_sheet_rows_from_items,
     build_sheet_rows_from_items,
+    build_video_metadata_map,
     previous_week_key_jst,
+    replace_public_sheet_rows,
     replace_sheet_rows,
     upsert_daily_snapshot_rows,
 )
@@ -25,6 +30,7 @@ RECENT_RECOMMENDATIONS_KEY = "favorites/aggregates/recent_recommendations.json"
 DAILY_SNAPSHOT_PREFIX = "favorites/exports/daily_snapshot/"
 DAILY_SNAPSHOT_LATEST_KEY = f"{DAILY_SNAPSHOT_PREFIX}latest.json"
 TALKS_JSON_KEY = "index/talks.json"
+LATEST_JSON_KEY = "index/latest.json"
 
 
 def _require_env(name: str) -> str:
@@ -123,6 +129,7 @@ def main() -> None:
     bucket = _require_env("R2_BUCKET_NAME")
 
     spreadsheet_id = normalize_spreadsheet_id(_require_env("SPREADSHEET_ID"))
+    public_favorites_spreadsheet_id = normalize_spreadsheet_id(_require_env("PUBLIC_FAVORITES_SPREADSHEET_ID"))
     service_account_json = _require_env("GOOGLE_SERVICE_ACCOUNT_JSON")
 
     s3 = boto3.client(
@@ -138,8 +145,10 @@ def main() -> None:
     hall_payload = _load_json_required(s3, bucket, HALL_OF_FAME_KEY)
     recent_payload = _load_json_required(s3, bucket, RECENT_RECOMMENDATIONS_KEY)
     talks_payload = _load_json_optional(s3, bucket, TALKS_JSON_KEY) or {}
+    latest_payload = _load_json_optional(s3, bucket, LATEST_JSON_KEY) or {}
 
     heading_title_map = build_heading_video_title_map(talks_payload)
+    video_metadata_map = build_video_metadata_map(talks_payload, latest_payload)
 
     current_rows = build_sheet_rows_from_items(
         payload=current_payload,
@@ -182,6 +191,24 @@ def main() -> None:
         rows=recent_rows,
     )
 
+    public_hall_rows = build_public_sheet_rows_from_items(payload=hall_payload, video_metadata_map=video_metadata_map)
+    public_recent_rows = build_public_sheet_rows_from_items(
+        payload=recent_payload,
+        video_metadata_map=video_metadata_map,
+    )
+    replace_public_sheet_rows(
+        client=gspread_client,
+        spreadsheet_id=public_favorites_spreadsheet_id,
+        worksheet_name=PUBLIC_FAVORITES_HALL_OF_FAME_SHEET,
+        rows=public_hall_rows,
+    )
+    replace_public_sheet_rows(
+        client=gspread_client,
+        spreadsheet_id=public_favorites_spreadsheet_id,
+        worksheet_name=PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
+        rows=public_recent_rows,
+    )
+
     daily_payloads = _load_daily_snapshots(s3, bucket)
     daily_rows: list[list[str]] = []
     for key, payload in daily_payloads:
@@ -208,6 +235,7 @@ def main() -> None:
     print(
         "favorites mirror done: "
         f"current={len(current_rows)}, hall={len(hall_rows)}, recent={len(recent_rows)}, "
+        f"public_hall={len(public_hall_rows)}, public_recent={len(public_recent_rows)}, "
         f"daily_rows={len(daily_rows)}, daily_updated={updated_count}, daily_appended={appended_count}"
     )
 
