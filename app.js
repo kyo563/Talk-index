@@ -1359,6 +1359,9 @@ async function loadFavoritesDataIfNeeded() {
 }
 
 async function loadFavoriteRankingIfNeeded() {
+  if (state.favoritesRankingStatus === "error") {
+    return;
+  }
   if (Array.isArray(state.favoritesCurrentRanking) || Array.isArray(state.favoritesCurrentRanking?.items)) {
     state.favoritesRankingStatus = "ready";
     return;
