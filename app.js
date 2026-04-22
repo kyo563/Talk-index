@@ -1388,20 +1388,25 @@ function getDisplayedVideoOpenKeys(videos) {
 
 function updateToggleAllButton() {
   const search = parseSearch(state.search);
-  let total = 0;
+
   if (state.viewMode === "video") {
     const videos = getFilteredVideos(search);
-    total = videos.length;
-  } else if (state.viewMode === "talk") {
-    const talks = getFilteredTalks(search);
-    total = talks.length;
-  } else {
-    refs.toggleAll.textContent = "全て展開/折りたたむ";
-    refs.toggleAll.disabled = true;
+    const allOpen = videos.length > 0 && getDisplayedVideoOpenKeys(videos).size === videos.length;
+    refs.toggleAll.disabled = videos.length === 0;
+    refs.toggleAll.textContent = allOpen ? "おりたたむ" : "全て展開";
     return;
   }
-  refs.toggleAll.disabled = false;
-  refs.toggleAll.textContent = "全て展開/折りたたむ";
+
+  if (state.viewMode === "talk") {
+    const talks = getFilteredTalks(search);
+    const allOpen = talks.length > 0 && talks.every((talk) => state.openTalkKeys.has(talk.key));
+    refs.toggleAll.disabled = talks.length === 0;
+    refs.toggleAll.textContent = allOpen ? "おりたたむ" : "全て展開";
+    return;
+  }
+
+  refs.toggleAll.textContent = "全て展開";
+  refs.toggleAll.disabled = true;
 }
 
 function updateTabs() {
@@ -2146,8 +2151,9 @@ function toggleAllByMode() {
   }
   if (state.viewMode === "favorites") return;
 
-  const allOpen = state.talks.length > 0 && state.openTalkKeys.size === state.talks.length;
-  state.openTalkKeys = allOpen ? new Set() : new Set(state.talks.map((talk) => talk.key));
+  const talks = getFilteredTalks();
+  const allOpen = talks.length > 0 && talks.every((talk) => state.openTalkKeys.has(talk.key));
+  state.openTalkKeys = allOpen ? new Set() : new Set(talks.map((talk) => talk.key));
 }
 
 async function switchViewMode(mode) {
