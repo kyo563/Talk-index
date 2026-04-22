@@ -158,7 +158,7 @@ npm run ci:build
 - 集計正本の時刻（`firstVotedAt`, `weekKey`, `daily_snapshot`）は **サーバ受信時刻** を使います
 - `payload.timestamp` は集計に使わず、必要時のみ `clientTimestamp` として保持します
 - hash 方式は Python / Worker 共通で `HMAC-SHA256(secret, "${scope}:${value}")` です
-- `recent_recommendations` は「今週」ではなく **先週（月曜〜日曜）** を参照します
+- `recent_recommendations` は **generatedAt基準の直近10日間** の投票イベントを再集計して参照します
 
 ### favorites の実装位置
 
@@ -216,7 +216,7 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
 
 - `favorites_current_ranking`（毎回全置換）
 - `favorites_hall_of_fame`（毎回全置換、上位3件）
-- `favorites_recent_recommendations`（毎回全置換、先週の上位5件）
+- `favorites_recent_recommendations`（毎回全置換、generatedAt基準の直近10日間上位5件）
 - `favorites_daily_snapshots`（`snapshotDate + headingId` をキーに upsert / 履歴保持）
 
 #### 列

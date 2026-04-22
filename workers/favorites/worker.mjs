@@ -37,6 +37,49 @@ function previousCompletedWeekKeyFromIso(iso) {
   return date.toISOString().slice(0, 10);
 }
 
+
+function buildRecentRecommendations(votes, generatedAtIso, windowDays = 10) {
+  const generatedAtMs = Date.parse(text(generatedAtIso));
+  if (!Number.isFinite(generatedAtMs)) return [];
+  const windowStartMs = generatedAtMs - windowDays * 24 * 60 * 60 * 1000;
+
+  const recentMap = new Map();
+  for (const vote of votes) {
+    const eventAt = text(vote.firstVotedAt);
+    const eventMs = Date.parse(eventAt);
+    if (!Number.isFinite(eventMs)) continue;
+    if (eventMs < windowStartMs || eventMs > generatedAtMs) continue;
+
+    const headingId = text(vote.headingId);
+    if (!headingId) continue;
+
+    if (!recentMap.has(headingId)) {
+      recentMap.set(headingId, {
+        headingId,
+        videoId: text(vote.videoId),
+        headingTitle: text(vote.headingTitle) || headingId,
+        videoTitle: text(vote.videoTitle),
+        headingStart: text(vote.headingStart),
+        sourceMode: text(vote.sourceMode) || "unknown",
+        voteCount: 0,
+        firstVotedAt: eventAt,
+        lastVotedAt: eventAt,
+      });
+    }
+
+    const item = recentMap.get(headingId);
+    item.voteCount += 1;
+    if (eventAt < text(item.firstVotedAt)) item.firstVotedAt = eventAt;
+    if (eventAt > text(item.lastVotedAt)) item.lastVotedAt = eventAt;
+  }
+
+  return Array.from(recentMap.values()).sort((a, b) => {
+    if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
+    if (a.firstVotedAt !== b.firstVotedAt) return a.firstVotedAt.localeCompare(b.firstVotedAt);
+    return a.headingId.localeCompare(b.headingId);
+  });
+}
+
 function canonicalVoteMetadata(receivedAtIso, payloadTimestamp) {
   const firstVotedAt = text(receivedAtIso);
   const metadata = {
@@ -241,16 +284,11 @@ async function rebuildAggregates(request, env) {
   });
 
   const generatedAt = new Date().toISOString();
-  const recentWeekKey = previousCompletedWeekKeyFromIso(generatedAt);
-  const weeklyCurrent = Array.from((weekly.get(recentWeekKey) || new Map()).values()).sort((a, b) => {
-    if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
-    if (a.firstVotedAt !== b.firstVotedAt) return a.firstVotedAt.localeCompare(b.firstVotedAt);
-    return a.headingId.localeCompare(b.headingId);
-  });
+  const recentItems = buildRecentRecommendations(votes, generatedAt, 10);
 
   const allTime = { generatedAt, source: "favorites/unique", items: sorted };
   const hall = { generatedAt, source: "favorites/unique", items: sorted.slice(0, 3) };
-  const recent = { generatedAt, source: "favorites/unique", weekKey: recentWeekKey, items: weeklyCurrent.slice(0, 5) };
+  const recent = { generatedAt, source: "favorites/unique", items: recentItems.slice(0, 5) };
   const currentRanking = { generatedAt, source: "favorites/unique", items: sorted };
   const snapshotDate = jstDateFromIso(generatedAt);
   const dailySnapshot = { generatedAt, source: "favorites/unique", snapshotDate, items: sorted };
@@ -275,7 +313,7 @@ async function rebuildAggregates(request, env) {
     );
   }
 
-  return jsonResponse({ status: "ok", uniqueVotes: votes.length, weekKey: recentWeekKey }, 200, {}, request, env);
+  return jsonResponse({ status: "ok", uniqueVotes: votes.length }, 200, {}, request, env);
 }
 
 async function readAggregate(request, env, key) {
@@ -321,6 +359,7 @@ export {
   jstDateFromIso,
   weekKeyJstFromIso,
   previousCompletedWeekKeyFromIso,
+  buildRecentRecommendations,
   hashWithSecret,
   canonicalVoteMetadata,
 };

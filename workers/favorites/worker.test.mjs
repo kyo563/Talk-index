@@ -4,14 +4,54 @@ import assert from 'node:assert/strict';
 import {
   jstDateFromIso,
   weekKeyJstFromIso,
-  previousCompletedWeekKeyFromIso,
+  buildRecentRecommendations,
   hashWithSecret,
   canonicalVoteMetadata,
 } from './worker.mjs';
 
-test('recent_recommendations 用 weekKey は先週', () => {
-  const nowIso = '2026-04-21T00:00:00Z';
-  assert.equal(previousCompletedWeekKeyFromIso(nowIso), '2026-04-13');
+test('recent_recommendations は generatedAt 基準の直近10日投票で再集計する', () => {
+  const generatedAt = '2026-04-22T12:00:00Z';
+  const votes = [
+    {
+      headingId: 'h-old-active',
+      firstVotedAt: '2026-04-21T03:00:00Z',
+      headingTitle: 'Old but active',
+      videoId: 'v1',
+      sourceMode: 'talk',
+    },
+    {
+      headingId: 'h-old-active',
+      firstVotedAt: '2026-04-14T12:00:00Z',
+      headingTitle: 'Old but active',
+      videoId: 'v1',
+      sourceMode: 'talk',
+    },
+    {
+      headingId: 'h-out',
+      firstVotedAt: '2026-04-12T11:59:59Z',
+      headingTitle: 'too old',
+      videoId: 'v2',
+      sourceMode: 'talk',
+    },
+  ];
+
+  const items = buildRecentRecommendations(votes, generatedAt, 10);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].headingId, 'h-old-active');
+  assert.equal(items[0].voteCount, 2);
+  assert.equal(items[0].firstVotedAt, '2026-04-14T12:00:00Z');
+  assert.equal(items[0].lastVotedAt, '2026-04-21T03:00:00Z');
+});
+
+test('recent_recommendations の tie-break は firstVotedAt → headingId', () => {
+  const generatedAt = '2026-04-22T12:00:00Z';
+  const votes = [
+    { headingId: 'b-id', firstVotedAt: '2026-04-20T01:00:00Z' },
+    { headingId: 'a-id', firstVotedAt: '2026-04-20T01:00:00Z' },
+  ];
+
+  const items = buildRecentRecommendations(votes, generatedAt, 10);
+  assert.deepEqual(items.map((item) => item.headingId), ['a-id', 'b-id']);
 });
 
 test('daily snapshot の JST 日付', () => {
