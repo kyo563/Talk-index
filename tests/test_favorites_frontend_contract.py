@@ -28,6 +28,18 @@ class FavoritesFrontendContractTests(unittest.TestCase):
         self.assertIn('missing.push("videoId")', app_js)
         self.assertIn('missing.push("headingTitle")', app_js)
         self.assertIn('missing.push("sourceVideoUrl_or_publishedAt")', app_js)
+        self.assertIn('state.unsyncedFavoriteHeadingIds.add(normalized);', app_js)
+
+    def test_vote_marked_only_on_success(self):
+        app_js = Path('app.js').read_text(encoding='utf-8')
+        self.assertIn('await sendFavoriteVote({', app_js)
+        self.assertIn('state.alreadyVotedHeadingIds.add(normalized);', app_js)
+        self.assertIn('if (state.alreadyVotedHeadingIds.has(normalized) && !state.unsyncedFavoriteHeadingIds.has(normalized)) {', app_js)
+
+    def test_toggle_off_clears_unsynced_and_voted_to_avoid_resend(self):
+        app_js = Path('app.js').read_text(encoding='utf-8')
+        self.assertIn('state.unsyncedFavoriteHeadingIds.delete(normalized);', app_js)
+        self.assertIn('state.alreadyVotedHeadingIds.delete(normalized);', app_js)
 
 
 if __name__ == '__main__':
