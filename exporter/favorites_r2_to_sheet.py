@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
-
 import boto3
 
 from crawler.services.favorites_mirror import (
@@ -20,7 +18,6 @@ from crawler.services.favorites_mirror import (
     build_public_sheet_rows_from_items,
     build_sheet_rows_from_items,
     build_video_metadata_map,
-    previous_week_key_jst,
     replace_public_sheet_rows,
     replace_sheet_rows,
     upsert_daily_snapshot_rows,
@@ -169,13 +166,12 @@ def main() -> None:
         heading_title_map=heading_title_map,
     )
 
-    recent_default_week = previous_week_key_jst(datetime.now(UTC))
     recent_rows = build_sheet_rows_from_items(
         payload=recent_payload,
         aggregate_type="recent_recommendations",
         source_json_url=RECENT_RECOMMENDATIONS_KEY,
         heading_title_map=heading_title_map,
-        default_week_key=recent_default_week,
+        default_week_key="",
     )
     recent_upload_rows = build_sheet_rows_from_items(
         payload=recent_upload_payload,

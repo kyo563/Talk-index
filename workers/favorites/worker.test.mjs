@@ -44,15 +44,18 @@ test('recent_recommendations は generatedAt 基準の直近240時間投票で�
   assert.equal(items[0].lastVotedAt, '2026-04-21T03:00:00Z');
 });
 
-test('recent_recommendations の tie-break は lastVotedAt desc → headingId', () => {
+test('recent_recommendations の tie-break は lastVotedAt desc → publishedAt asc(古い優先) → headingId', () => {
   const generatedAt = '2026-04-22T12:00:00Z';
   const votes = [
-    { headingId: 'b-id', firstVotedAt: '2026-04-20T01:00:00Z' },
-    { headingId: 'a-id', firstVotedAt: '2026-04-20T02:00:00Z' },
+    { headingId: 'newer', videoId: 'v-newer', firstVotedAt: '2026-04-20T02:00:00Z', publishedAt: '2026-04-21', sourceVideoUrl: 'https://example.com/new', sourceVideoTitle: 'new' },
+    { headingId: 'older', videoId: 'v-older', firstVotedAt: '2026-04-20T02:00:00Z', publishedAt: '2026-04-20', sourceVideoUrl: 'https://example.com/old', sourceVideoTitle: 'old' },
   ];
 
   const items = buildRecentRecommendations(votes, generatedAt, 240);
-  assert.deepEqual(items.map((item) => item.headingId), ['a-id', 'b-id']);
+  assert.deepEqual(items.map((item) => item.headingId), ['older', 'newer']);
+  assert.equal(items[0].publishedAt, '2026-04-20');
+  assert.equal(items[0].sourceVideoUrl, 'https://example.com/old');
+  assert.equal(items[0].sourceVideoTitle, 'old');
 });
 
 test('recent_upload_recommendations は168時間以内の公開動画のみ対象', () => {
