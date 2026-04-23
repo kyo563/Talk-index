@@ -1312,7 +1312,7 @@ function resolveVideoFavoriteContext(headingId, sourceContext = null) {
 async function syncFavoriteVote(headingId, sourceTalk = null) {
   const normalized = text(headingId);
   if (!normalized || !state.favoritedHeadingIds.has(normalized)) return false;
-  if (state.alreadyVotedHeadingIds.has(normalized)) {
+  if (state.alreadyVotedHeadingIds.has(normalized) && !state.unsyncedFavoriteHeadingIds.has(normalized)) {
     state.unsyncedFavoriteHeadingIds.delete(normalized);
     saveFavoritesToStorage();
     return true;
@@ -1359,6 +1359,8 @@ async function syncFavoriteVote(headingId, sourceTalk = null) {
     if (!headingTitle) missing.push("headingTitle");
     if (!(sourceVideoUrl || canonicalPublishedAt)) missing.push("sourceVideoUrl_or_publishedAt");
     if (missing.length) {
+      state.unsyncedFavoriteHeadingIds.add(normalized);
+      saveFavoritesToStorage();
       console.warn("[favorites] video mode vote skipped due to missing metadata", {
         headingId: normalized,
         missing,
@@ -1467,6 +1469,8 @@ async function toggleFavoriteHeading(headingId, sourceTalk = null) {
   const alreadyFavorite = state.favoritedHeadingIds.has(normalized);
   if (alreadyFavorite) {
     state.favoritedHeadingIds.delete(normalized);
+    state.unsyncedFavoriteHeadingIds.delete(normalized);
+    state.alreadyVotedHeadingIds.delete(normalized);
     saveFavoritesToStorage();
     render();
     return;
