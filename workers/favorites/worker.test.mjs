@@ -6,6 +6,8 @@ import {
   weekKeyJstFromIso,
   buildRecentRecommendations,
   buildRecentUploadRecommendations,
+  buildVideoMetadataMap,
+  buildAggregatesFromVotes,
   hashWithSecret,
   canonicalVoteMetadata,
 } from './worker.mjs';
@@ -75,6 +77,86 @@ test('recent_upload_recommendations の tie-break は publishedAt asc(古い優�
     { headingId: 'newer', voteCount: 2, publishedAt: '2026-04-21' },
   ], generatedAt, 168);
   assert.deepEqual(items.map((item) => item.headingId), ['a-id', 'b-id', 'newer']);
+});
+
+test('aggregate は後続 vote の metadata で backfill する', () => {
+  const votes = [
+    {
+      headingId: 'h1',
+      firstVotedAt: '2026-04-20T00:00:00Z',
+      weekKey: '2026-04-20',
+      videoId: 'vid-1',
+    },
+    {
+      headingId: 'h1',
+      firstVotedAt: '2026-04-21T00:00:00Z',
+      weekKey: '2026-04-20',
+      videoId: 'vid-1',
+      videoTitle: 'Video One',
+      sourceVideoTitle: 'Source One',
+      sourceVideoUrl: 'https://youtube.com/watch?v=vid-1',
+      publishedAt: '2026-04-19',
+    },
+  ];
+
+  const { sorted } = buildAggregatesFromVotes(votes, '2026-04-22T00:00:00Z');
+  assert.equal(sorted[0].videoTitle, 'Video One');
+  assert.equal(sorted[0].sourceVideoTitle, 'Source One');
+  assert.equal(sorted[0].sourceVideoUrl, 'https://youtube.com/watch?v=vid-1');
+  assert.equal(sorted[0].publishedAt, '2026-04-19');
+});
+
+test('ranking / hall / current 向け item に sourceVideoTitle/sourceVideoUrl が残る', () => {
+  const votes = [
+    {
+      headingId: 'h2',
+      firstVotedAt: '2026-04-21T00:00:00Z',
+      weekKey: '2026-04-20',
+      sourceVideoTitle: 'S2',
+      sourceVideoUrl: 'https://example.com/s2',
+    },
+  ];
+  const { sorted } = buildAggregatesFromVotes(votes, '2026-04-22T00:00:00Z');
+  assert.equal(sorted[0].sourceVideoTitle, 'S2');
+  assert.equal(sorted[0].sourceVideoUrl, 'https://example.com/s2');
+});
+
+test('recent_upload_recommendations は後続 vote の publishedAt 補完で落ちない', () => {
+  const votes = [
+    { headingId: 'h3', videoId: 'vid-3', firstVotedAt: '2026-04-21T00:00:00Z', weekKey: '2026-04-20' },
+    { headingId: 'h3', videoId: 'vid-3', firstVotedAt: '2026-04-21T01:00:00Z', weekKey: '2026-04-20', publishedAt: '2026-04-20' },
+  ];
+  const { recentUploadItems } = buildAggregatesFromVotes(votes, '2026-04-22T12:00:00Z');
+  assert.deepEqual(recentUploadItems.map((item) => item.headingId), ['h3']);
+});
+
+test('legacy vote でも talks/latest metadata map から復元できる', () => {
+  const talksPayload = {
+    talks: [
+      {
+        date: '2026-04-20',
+        subsections: [
+          { videoUrl: 'https://www.youtube.com/watch?v=legacy-1', videoTitle: 'Legacy Title' },
+        ],
+      },
+    ],
+  };
+  const latestPayload = { items: [] };
+  const metadataMap = buildVideoMetadataMap(talksPayload, latestPayload);
+  const votes = [
+    {
+      headingId: 'h-legacy',
+      videoId: 'legacy-1',
+      firstVotedAt: '2026-04-21T00:00:00Z',
+      weekKey: '2026-04-20',
+    },
+  ];
+  const { sorted, recentUploadItems } = buildAggregatesFromVotes(votes, '2026-04-22T12:00:00Z', metadataMap);
+  assert.equal(sorted[0].videoTitle, 'Legacy Title');
+  assert.equal(sorted[0].sourceVideoTitle, 'Legacy Title');
+  assert.equal(sorted[0].sourceVideoUrl, 'https://www.youtube.com/watch?v=legacy-1');
+  assert.equal(sorted[0].publishedAt, '2026-04-20');
+  assert.equal(recentUploadItems.length, 1);
 });
 
 test('daily snapshot の JST 日付', () => {

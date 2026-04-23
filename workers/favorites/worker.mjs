@@ -43,7 +43,112 @@ function parseEventMs(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function buildRecentRecommendations(votes, generatedAtIso, windowHours = 240) {
+function buildVideoMetadataMap(talksPayload, latestPayload) {
+  const map = new Map();
+
+  const talks = Array.isArray(talksPayload?.talks) ? talksPayload.talks : [];
+  for (const talk of talks) {
+    if (!talk || typeof talk !== "object") continue;
+    const talkDate = text(talk.date);
+    const subsections = Array.isArray(talk.subsections) ? talk.subsections : [];
+    for (const subsection of subsections) {
+      if (!subsection || typeof subsection !== "object") continue;
+      const url = text(subsection.videoUrl);
+      const videoId = text(subsection.videoId) || extractVideoId(url);
+      if (!videoId) continue;
+      map.set(videoId, {
+        title: text(subsection.videoTitle),
+        url,
+        publishedAt: talkDate,
+      });
+    }
+  }
+
+  let latestItems = [];
+  if (Array.isArray(latestPayload)) {
+    latestItems = latestPayload;
+  } else if (latestPayload && typeof latestPayload === "object") {
+    for (const key of ["videos", "items", "data"]) {
+      if (Array.isArray(latestPayload[key])) {
+        latestItems = latestPayload[key];
+        break;
+      }
+    }
+  }
+
+  for (const item of latestItems) {
+    if (!item || typeof item !== "object") continue;
+    const videoId = text(item.id) || text(item.videoId) || extractVideoId(text(item.url));
+    if (!videoId) continue;
+    const existing = map.get(videoId) || {};
+    map.set(videoId, {
+      title: text(item.title) || text(existing.title),
+      url: text(item.url) || text(existing.url),
+      publishedAt: text(item.date) || text(item.publishedAt) || text(existing.publishedAt),
+    });
+  }
+
+  return map;
+}
+
+function extractVideoId(url) {
+  const raw = text(url);
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    if (parsed.hostname.includes("youtu.be")) {
+      return text(parsed.pathname.split("/").filter(Boolean)[0]);
+    }
+    if (parsed.hostname.includes("youtube.com")) {
+      return text(parsed.searchParams.get("v"));
+    }
+  } catch {
+    // noop
+  }
+  return "";
+}
+
+function createAggregateItem(vote) {
+  return {
+    headingId: text(vote.headingId),
+    videoId: text(vote.videoId),
+    headingTitle: text(vote.headingTitle) || text(vote.headingId),
+    videoTitle: text(vote.videoTitle),
+    sourceVideoTitle: text(vote.sourceVideoTitle) || text(vote.videoTitle),
+    sourceVideoUrl: text(vote.sourceVideoUrl) || text(vote.videoUrl),
+    headingStart: text(vote.headingStart),
+    publishedAt: text(vote.publishedAt),
+    videoDate: text(vote.videoDate),
+    sourceMode: text(vote.sourceMode) || "unknown",
+    voteCount: 0,
+    firstVotedAt: text(vote.firstVotedAt),
+    lastVotedAt: text(vote.firstVotedAt),
+  };
+}
+
+function backfillAggregateMetadata(item, vote = {}, meta = {}) {
+  if (!text(item.videoId) && text(vote.videoId)) item.videoId = text(vote.videoId);
+  if (!text(item.videoId) && text(meta.videoId)) item.videoId = text(meta.videoId);
+  if (!text(item.headingTitle) && text(vote.headingTitle)) item.headingTitle = text(vote.headingTitle);
+  if (!text(item.videoTitle) && text(vote.videoTitle)) item.videoTitle = text(vote.videoTitle);
+  if (!text(item.videoTitle) && text(meta.title)) item.videoTitle = text(meta.title);
+  if (!text(item.sourceVideoTitle) && text(vote.sourceVideoTitle)) item.sourceVideoTitle = text(vote.sourceVideoTitle);
+  if (!text(item.sourceVideoTitle) && text(vote.videoTitle)) item.sourceVideoTitle = text(vote.videoTitle);
+  if (!text(item.sourceVideoTitle) && text(meta.title)) item.sourceVideoTitle = text(meta.title);
+  if (!text(item.sourceVideoUrl) && text(vote.sourceVideoUrl)) item.sourceVideoUrl = text(vote.sourceVideoUrl);
+  if (!text(item.sourceVideoUrl) && text(vote.videoUrl)) item.sourceVideoUrl = text(vote.videoUrl);
+  if (!text(item.sourceVideoUrl) && text(meta.url)) item.sourceVideoUrl = text(meta.url);
+  if (!text(item.headingStart) && text(vote.headingStart)) item.headingStart = text(vote.headingStart);
+  if (!text(item.publishedAt) && text(vote.publishedAt)) item.publishedAt = text(vote.publishedAt);
+  if (!text(item.publishedAt) && text(vote.videoDate)) item.publishedAt = text(vote.videoDate);
+  if (!text(item.publishedAt) && text(meta.publishedAt)) item.publishedAt = text(meta.publishedAt);
+  if (!text(item.videoDate) && text(vote.videoDate)) item.videoDate = text(vote.videoDate);
+  if (!text(item.videoDate) && text(vote.publishedAt)) item.videoDate = text(vote.publishedAt);
+  if (!text(item.videoDate) && text(meta.publishedAt)) item.videoDate = text(meta.publishedAt);
+  if (!text(item.sourceMode) && text(vote.sourceMode)) item.sourceMode = text(vote.sourceMode);
+}
+
+function buildRecentRecommendations(votes, generatedAtIso, windowHours = 240, videoMetadataMap = new Map()) {
   const generatedAtMs = Date.parse(text(generatedAtIso));
   if (!Number.isFinite(generatedAtMs)) return [];
   const windowStartMs = generatedAtMs - windowHours * 60 * 60 * 1000;
@@ -58,25 +163,10 @@ function buildRecentRecommendations(votes, generatedAtIso, windowHours = 240) {
     const headingId = text(vote.headingId);
     if (!headingId) continue;
 
-    if (!recentMap.has(headingId)) {
-      recentMap.set(headingId, {
-        headingId,
-        videoId: text(vote.videoId),
-        headingTitle: text(vote.headingTitle) || headingId,
-        videoTitle: text(vote.videoTitle),
-        sourceVideoTitle: text(vote.sourceVideoTitle),
-        sourceVideoUrl: text(vote.sourceVideoUrl),
-        headingStart: text(vote.headingStart),
-        publishedAt: text(vote.publishedAt),
-        videoDate: text(vote.videoDate),
-        sourceMode: text(vote.sourceMode) || "unknown",
-        voteCount: 0,
-        firstVotedAt: eventAt,
-        lastVotedAt: eventAt,
-      });
-    }
+    if (!recentMap.has(headingId)) recentMap.set(headingId, createAggregateItem(vote));
 
     const item = recentMap.get(headingId);
+    backfillAggregateMetadata(item, vote, videoMetadataMap.get(text(item.videoId)) || {});
     item.voteCount += 1;
     if (eventAt < text(item.firstVotedAt)) item.firstVotedAt = eventAt;
     if (eventAt > text(item.lastVotedAt)) item.lastVotedAt = eventAt;
@@ -128,6 +218,56 @@ function buildRecentUploadRecommendations(rankingItems, generatedAtIso, windowHo
   });
 
   return items.map(({ publishedAtMs, ...item }) => item);
+}
+
+function buildAggregatesFromVotes(votes, generatedAt, videoMetadataMap = new Map()) {
+  const ranking = new Map();
+  const weekly = new Map();
+
+  for (const vote of votes) {
+    const headingId = text(vote.headingId);
+    if (!headingId) continue;
+
+    if (!ranking.has(headingId)) ranking.set(headingId, createAggregateItem(vote));
+    const item = ranking.get(headingId);
+    backfillAggregateMetadata(item, vote, videoMetadataMap.get(text(item.videoId)) || {});
+    item.voteCount += 1;
+    if (text(vote.firstVotedAt) < text(item.firstVotedAt)) item.firstVotedAt = text(vote.firstVotedAt);
+    if (text(vote.firstVotedAt) > text(item.lastVotedAt)) item.lastVotedAt = text(vote.firstVotedAt);
+
+    const weekKey = text(vote.weekKey) || weekKeyJstFromIso(text(vote.firstVotedAt));
+    if (!weekly.has(weekKey)) weekly.set(weekKey, new Map());
+    const weekMap = weekly.get(weekKey);
+    if (!weekMap.has(headingId)) weekMap.set(headingId, createAggregateItem(vote));
+    const weekItem = weekMap.get(headingId);
+    backfillAggregateMetadata(weekItem, vote, videoMetadataMap.get(text(weekItem.videoId)) || {});
+    weekItem.voteCount += 1;
+    if (text(vote.firstVotedAt) < text(weekItem.firstVotedAt)) weekItem.firstVotedAt = text(vote.firstVotedAt);
+    if (text(vote.firstVotedAt) > text(weekItem.lastVotedAt)) weekItem.lastVotedAt = text(vote.firstVotedAt);
+  }
+
+  for (const item of ranking.values()) {
+    backfillAggregateMetadata(item, {}, videoMetadataMap.get(text(item.videoId)) || {});
+  }
+  for (const map of weekly.values()) {
+    for (const item of map.values()) {
+      backfillAggregateMetadata(item, {}, videoMetadataMap.get(text(item.videoId)) || {});
+    }
+  }
+
+  const sorted = Array.from(ranking.values()).sort((a, b) => {
+    if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
+    const aPublished = parsePublishedAt(text(a.publishedAt) || text(a.videoDate)) ?? Number.MAX_SAFE_INTEGER;
+    const bPublished = parsePublishedAt(text(b.publishedAt) || text(b.videoDate)) ?? Number.MAX_SAFE_INTEGER;
+    if (aPublished !== bPublished) return aPublished - bPublished;
+    const videoCmp = text(a.videoId).localeCompare(text(b.videoId));
+    if (videoCmp !== 0) return videoCmp;
+    return text(a.headingId).localeCompare(text(b.headingId));
+  });
+
+  const recentItems = buildRecentRecommendations(votes, generatedAt, 240, videoMetadataMap);
+  const recentUploadItems = buildRecentUploadRecommendations(sorted, generatedAt, 168);
+  return { sorted, weekly, recentItems, recentUploadItems };
 }
 
 function canonicalVoteMetadata(receivedAtIso, payloadTimestamp) {
@@ -284,67 +424,11 @@ async function rebuildAggregates(request, env) {
     }
   } while (cursor);
 
-  const ranking = new Map();
-  const weekly = new Map();
-
-  for (const vote of votes) {
-    const headingId = text(vote.headingId);
-    if (!headingId) continue;
-    if (!ranking.has(headingId)) {
-      ranking.set(headingId, {
-        headingId,
-        videoId: text(vote.videoId),
-        headingTitle: text(vote.headingTitle) || headingId,
-        videoTitle: text(vote.videoTitle),
-        headingStart: text(vote.headingStart),
-        sourceMode: text(vote.sourceMode) || "unknown",
-        voteCount: 0,
-        firstVotedAt: text(vote.firstVotedAt),
-        lastVotedAt: text(vote.firstVotedAt),
-        publishedAt: text(vote.publishedAt),
-      });
-    }
-    const item = ranking.get(headingId);
-    item.voteCount += 1;
-    if (text(vote.firstVotedAt) < text(item.firstVotedAt)) item.firstVotedAt = text(vote.firstVotedAt);
-    if (text(vote.firstVotedAt) > text(item.lastVotedAt)) item.lastVotedAt = text(vote.firstVotedAt);
-
-    const weekKey = text(vote.weekKey) || weekKeyJstFromIso(text(vote.firstVotedAt));
-    if (!weekly.has(weekKey)) weekly.set(weekKey, new Map());
-    const weekMap = weekly.get(weekKey);
-    if (!weekMap.has(headingId)) {
-      weekMap.set(headingId, {
-        headingId,
-        videoId: text(vote.videoId),
-        headingTitle: text(vote.headingTitle) || headingId,
-        videoTitle: text(vote.videoTitle),
-        headingStart: text(vote.headingStart),
-        sourceMode: text(vote.sourceMode) || "unknown",
-        voteCount: 0,
-        firstVotedAt: text(vote.firstVotedAt),
-        lastVotedAt: text(vote.firstVotedAt),
-        publishedAt: text(vote.publishedAt),
-      });
-    }
-    const weekItem = weekMap.get(headingId);
-    weekItem.voteCount += 1;
-    if (text(vote.firstVotedAt) < text(weekItem.firstVotedAt)) weekItem.firstVotedAt = text(vote.firstVotedAt);
-    if (text(vote.firstVotedAt) > text(weekItem.lastVotedAt)) weekItem.lastVotedAt = text(vote.firstVotedAt);
-  }
-
-  const sorted = Array.from(ranking.values()).sort((a, b) => {
-    if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
-    const aPublished = parsePublishedAt(text(a.publishedAt) || text(a.videoDate)) ?? Number.MAX_SAFE_INTEGER;
-    const bPublished = parsePublishedAt(text(b.publishedAt) || text(b.videoDate)) ?? Number.MAX_SAFE_INTEGER;
-    if (aPublished !== bPublished) return aPublished - bPublished;
-    const videoCmp = text(a.videoId).localeCompare(text(b.videoId));
-    if (videoCmp !== 0) return videoCmp;
-    return text(a.headingId).localeCompare(text(b.headingId));
-  });
-
   const generatedAt = new Date().toISOString();
-  const recentItems = buildRecentRecommendations(votes, generatedAt, 240);
-  const recentUploadItems = buildRecentUploadRecommendations(sorted, generatedAt, 168);
+  const talksPayload = await readJsonObject(env.FAVORITES_BUCKET, "index/talks.json");
+  const latestPayload = await readJsonObject(env.FAVORITES_BUCKET, "index/latest.json");
+  const videoMetadataMap = buildVideoMetadataMap(talksPayload || {}, latestPayload || {});
+  const { sorted, weekly, recentItems, recentUploadItems } = buildAggregatesFromVotes(votes, generatedAt, videoMetadataMap);
 
   const allTime = { generatedAt, source: "favorites/unique", items: sorted };
   const hall = { generatedAt, source: "favorites/unique", items: sorted };
@@ -430,6 +514,8 @@ export {
   previousCompletedWeekKeyFromIso,
   buildRecentRecommendations,
   buildRecentUploadRecommendations,
+  buildVideoMetadataMap,
+  buildAggregatesFromVotes,
   hashWithSecret,
   canonicalVoteMetadata,
 };
