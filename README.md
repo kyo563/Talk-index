@@ -164,6 +164,10 @@ npm run ci:build
 - `hall_of_fame` は **全期間・全動画・全トークテーマ** を累計票で集計します（R2は全件保持）
 - `recent_recommendations` は **generatedAt基準の直近240時間（10日）** の投票イベントだけを再集計します（票が1以上の項目を全件保持）
 - `recent_upload_recommendations` は **generatedAt の JST 日付を基準に、当日を含む直近7日間（6日前〜当日）に公開された動画群**を対象に、対象動画内トークの累計票で集計します（R2は全件保持）
+- metadata 補完優先順位は `videoId -> sourceVideoUrl -> sourceVideoTitle -> videoTitle -> headingId` です（`headingTitle` 単独一致は誤結合防止のため使いません）
+- `sourceVideoTitle` / `videoTitle` は normalize 後の厳密一致のみ使い、重複タイトルは曖昧扱いで不採用にします
+- `POST /favorites/vote` は、payload が十分な場合はその値を優先し、不足時のみ `index/talks.json` / `index/latest.json` を参照して補完します
+- 補完しても最低要件（`videoId`, `publishedAt|videoDate`, `sourceVideoUrl`, `sourceVideoTitle|videoTitle`）を満たせない場合は、`metadataIncomplete: true` と `metadataIncompleteReason: string[]` を保存します
 
 ### favorites の実装位置
 

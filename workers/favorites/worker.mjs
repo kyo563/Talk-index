@@ -43,24 +43,109 @@ function parseEventMs(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function buildVideoMetadataMap(talksPayload, latestPayload) {
-  const map = new Map();
+function normalizeTitle(value) {
+  return text(value)
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function canonicalizeYouTubeUrl(value) {
+  const videoId = extractYouTubeVideoId(value);
+  return videoId ? `https://www.youtube.com/watch?v=${videoId}` : "";
+}
+
+function extractYouTubeVideoId(url) {
+  const raw = text(url);
+  if (!raw) return "";
+  if (/^[a-zA-Z0-9_-]{11}$/.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "youtu.be") {
+      return text(parsed.pathname.split("/").filter(Boolean)[0]);
+    }
+    if (host.endsWith("youtube.com")) {
+      if (parsed.pathname.startsWith("/shorts/")) {
+        return text(parsed.pathname.replace("/shorts/", "").split("/")[0]);
+      }
+      return text(parsed.searchParams.get("v"));
+    }
+  } catch {
+    // noop
+  }
+  return "";
+}
+
+function buildVideoMetadataMaps(talksPayload, latestPayload) {
+  const byVideoId = new Map();
+  const byCanonicalUrl = new Map();
+  const byHeadingId = new Map();
+  const byTitleHits = new Map();
+  const byHeadingTitleHits = new Map();
+  const ambiguousTitles = new Set();
+  const ambiguousHeadingTitles = new Set();
+
+  function registerTitleHit(target, rawTitle, metadata) {
+    const normalized = normalizeTitle(rawTitle);
+    if (!normalized) return;
+    const existing = target.get(normalized);
+    if (!existing) {
+      target.set(normalized, metadata);
+      return;
+    }
+    if (existing.videoId !== metadata.videoId) {
+      target.set(normalized, null);
+      if (target === byTitleHits) ambiguousTitles.add(normalized);
+      if (target === byHeadingTitleHits) ambiguousHeadingTitles.add(normalized);
+    }
+  }
+
+  function registerMetadata(partial, context = {}) {
+    const videoId = text(partial.videoId) || extractYouTubeVideoId(partial.url);
+    if (!videoId) return;
+    const url = canonicalizeYouTubeUrl(partial.url) || canonicalizeYouTubeUrl(videoId);
+    const next = {
+      videoId,
+      title: text(partial.title),
+      url,
+      publishedAt: text(partial.publishedAt),
+      videoDate: text(partial.videoDate) || text(partial.publishedAt),
+    };
+    const existing = byVideoId.get(videoId) || {};
+    const merged = {
+      videoId,
+      title: text(next.title) || text(existing.title),
+      url: text(next.url) || text(existing.url),
+      publishedAt: text(next.publishedAt) || text(existing.publishedAt),
+      videoDate: text(next.videoDate) || text(existing.videoDate) || text(next.publishedAt) || text(existing.publishedAt),
+    };
+    byVideoId.set(videoId, merged);
+    if (merged.url) byCanonicalUrl.set(merged.url, merged);
+    registerTitleHit(byTitleHits, merged.title, merged);
+
+    const headingId = text(context.headingId);
+    if (headingId) byHeadingId.set(headingId, merged);
+    registerTitleHit(byHeadingTitleHits, context.headingTitle, merged);
+  }
 
   const talks = Array.isArray(talksPayload?.talks) ? talksPayload.talks : [];
   for (const talk of talks) {
     if (!talk || typeof talk !== "object") continue;
     const talkDate = text(talk.date);
+    const headingId = text(talk.headingId) || text(talk.id);
+    const headingTitle = text(talk.name) || text(talk.headingTitle);
     const subsections = Array.isArray(talk.subsections) ? talk.subsections : [];
     for (const subsection of subsections) {
       if (!subsection || typeof subsection !== "object") continue;
       const url = text(subsection.videoUrl);
-      const videoId = text(subsection.videoId) || extractVideoId(url);
-      if (!videoId) continue;
-      map.set(videoId, {
+      registerMetadata({
+        videoId: text(subsection.videoId),
         title: text(subsection.videoTitle),
         url,
         publishedAt: talkDate,
-      });
+      }, { headingId, headingTitle });
     }
   }
 
@@ -78,34 +163,137 @@ function buildVideoMetadataMap(talksPayload, latestPayload) {
 
   for (const item of latestItems) {
     if (!item || typeof item !== "object") continue;
-    const videoId = text(item.id) || text(item.videoId) || extractVideoId(text(item.url));
-    if (!videoId) continue;
-    const existing = map.get(videoId) || {};
-    map.set(videoId, {
-      title: text(item.title) || text(existing.title),
-      url: text(item.url) || text(existing.url),
-      publishedAt: text(item.date) || text(item.publishedAt) || text(existing.publishedAt),
+    registerMetadata({
+      videoId: text(item.id) || text(item.videoId),
+      title: text(item.title),
+      url: text(item.url),
+      publishedAt: text(item.date) || text(item.publishedAt),
     });
   }
 
-  return map;
+  const byNormalizedTitle = new Map();
+  for (const [key, value] of byTitleHits.entries()) {
+    if (value) byNormalizedTitle.set(key, value);
+  }
+  const byNormalizedHeadingTitle = new Map();
+  for (const [key, value] of byHeadingTitleHits.entries()) {
+    if (value) byNormalizedHeadingTitle.set(key, value);
+  }
+
+  return {
+    byVideoId,
+    byCanonicalUrl,
+    byNormalizedTitle,
+    byHeadingId,
+    byNormalizedHeadingTitle,
+    ambiguousTitles,
+    ambiguousHeadingTitles,
+  };
 }
 
-function extractVideoId(url) {
-  const raw = text(url);
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    if (parsed.hostname.includes("youtu.be")) {
-      return text(parsed.pathname.split("/").filter(Boolean)[0]);
-    }
-    if (parsed.hostname.includes("youtube.com")) {
-      return text(parsed.searchParams.get("v"));
-    }
-  } catch {
-    // noop
+function buildVideoMetadataMap(talksPayload, latestPayload) {
+  return buildVideoMetadataMaps(talksPayload, latestPayload).byVideoId;
+}
+
+function ensureVideoMetadataMaps(mapsOrMap) {
+  if (mapsOrMap && typeof mapsOrMap === "object" && mapsOrMap.byVideoId instanceof Map) {
+    return mapsOrMap;
   }
-  return "";
+  const byVideoId = mapsOrMap instanceof Map ? mapsOrMap : new Map();
+  return {
+    byVideoId,
+    byCanonicalUrl: new Map(),
+    byNormalizedTitle: new Map(),
+    byHeadingId: new Map(),
+    byNormalizedHeadingTitle: new Map(),
+    ambiguousTitles: new Set(),
+    ambiguousHeadingTitles: new Set(),
+  };
+}
+
+function resolveVoteMetadata(vote, mapsOrMap) {
+  const maps = ensureVideoMetadataMaps(mapsOrMap);
+  const normalizedVote = {
+    ...vote,
+    headingId: text(vote?.headingId),
+    videoId: text(vote?.videoId),
+    headingTitle: text(vote?.headingTitle),
+    videoTitle: text(vote?.videoTitle),
+    sourceVideoTitle: text(vote?.sourceVideoTitle),
+    sourceVideoUrl: text(vote?.sourceVideoUrl) || text(vote?.videoUrl),
+    headingStart: text(vote?.headingStart),
+    publishedAt: text(vote?.publishedAt),
+    videoDate: text(vote?.videoDate),
+    sourceMode: text(vote?.sourceMode) || "unknown",
+  };
+
+  let resolvedMeta = null;
+  const byId = maps.byVideoId.get(normalizedVote.videoId);
+  if (byId) resolvedMeta = byId;
+
+  const extractedFromUrl = extractYouTubeVideoId(normalizedVote.sourceVideoUrl);
+  if (!resolvedMeta && extractedFromUrl && maps.byVideoId.get(extractedFromUrl)) {
+    resolvedMeta = maps.byVideoId.get(extractedFromUrl);
+  }
+  if (!resolvedMeta) {
+    const canonicalUrl = canonicalizeYouTubeUrl(normalizedVote.sourceVideoUrl);
+    if (canonicalUrl && maps.byCanonicalUrl.get(canonicalUrl)) resolvedMeta = maps.byCanonicalUrl.get(canonicalUrl);
+  }
+  if (!resolvedMeta) {
+    const bySourceTitle = maps.byNormalizedTitle.get(normalizeTitle(normalizedVote.sourceVideoTitle));
+    if (bySourceTitle) resolvedMeta = bySourceTitle;
+  }
+  if (!resolvedMeta) {
+    const byVideoTitle = maps.byNormalizedTitle.get(normalizeTitle(normalizedVote.videoTitle));
+    if (byVideoTitle) resolvedMeta = byVideoTitle;
+  }
+  if (!resolvedMeta && normalizedVote.headingId && maps.byHeadingId.get(normalizedVote.headingId)) {
+    resolvedMeta = maps.byHeadingId.get(normalizedVote.headingId);
+  }
+  const meta = resolvedMeta || {};
+  const resolvedVideoId = normalizedVote.videoId || extractedFromUrl || text(meta.videoId);
+  const rawSourceUrl = text(normalizedVote.sourceVideoUrl);
+  const resolvedUrl = canonicalizeYouTubeUrl(rawSourceUrl)
+    || rawSourceUrl
+    || canonicalizeYouTubeUrl(resolvedVideoId)
+    || text(meta.url);
+  const resolvedPublishedAt = normalizedVote.publishedAt || normalizedVote.videoDate || text(meta.publishedAt) || text(meta.videoDate);
+  const resolvedVideoDate = normalizedVote.videoDate || normalizedVote.publishedAt || text(meta.videoDate) || text(meta.publishedAt);
+  const resolvedVideoTitle = normalizedVote.videoTitle || text(meta.title);
+  const resolvedSourceVideoTitle = normalizedVote.sourceVideoTitle || resolvedVideoTitle || text(meta.title);
+
+  const result = {
+    ...vote,
+    ...normalizedVote,
+    videoId: resolvedVideoId,
+    videoTitle: resolvedVideoTitle,
+    sourceVideoTitle: resolvedSourceVideoTitle,
+    sourceVideoUrl: resolvedUrl,
+    publishedAt: resolvedPublishedAt,
+    videoDate: resolvedVideoDate,
+  };
+
+  const reasons = [];
+  if (!text(result.videoId)) reasons.push("missing_video_id");
+  if (!(text(result.publishedAt) || text(result.videoDate))) reasons.push("missing_published_at");
+  if (!(text(result.sourceVideoTitle) || text(result.videoTitle))) reasons.push("missing_video_title");
+  if (!text(result.sourceVideoUrl)) reasons.push("missing_source_video_url");
+
+  const sourceTitleKey = normalizeTitle(normalizedVote.sourceVideoTitle);
+  const videoTitleKey = normalizeTitle(normalizedVote.videoTitle);
+  if (sourceTitleKey && maps.ambiguousTitles.has(sourceTitleKey)) reasons.push("title_ambiguous");
+  if (videoTitleKey && maps.ambiguousTitles.has(videoTitleKey)) reasons.push("title_ambiguous");
+  const headingTitleKey = normalizeTitle(normalizedVote.headingTitle);
+  if (headingTitleKey && maps.ambiguousHeadingTitles.has(headingTitleKey)) reasons.push("heading_title_ambiguous");
+  if (text(normalizedVote.sourceVideoUrl) && !extractYouTubeVideoId(normalizedVote.sourceVideoUrl) && !text(result.sourceVideoUrl)) {
+    reasons.push("url_unparseable");
+  }
+
+  const uniqueReasons = Array.from(new Set(reasons));
+  const hasMinimum = uniqueReasons.length === 0;
+  result.metadataIncomplete = !hasMinimum;
+  result.metadataIncompleteReason = uniqueReasons;
+  return result;
 }
 
 function createAggregateItem(vote) {
@@ -149,24 +337,26 @@ function backfillAggregateMetadata(item, vote = {}, meta = {}) {
 }
 
 function buildRecentRecommendations(votes, generatedAtIso, windowHours = 240, videoMetadataMap = new Map()) {
+  const maps = ensureVideoMetadataMaps(videoMetadataMap);
   const generatedAtMs = Date.parse(text(generatedAtIso));
   if (!Number.isFinite(generatedAtMs)) return [];
   const windowStartMs = generatedAtMs - windowHours * 60 * 60 * 1000;
 
   const recentMap = new Map();
   for (const vote of votes) {
-    const eventAt = text(vote.firstVotedAt);
+    const resolvedVote = resolveVoteMetadata(vote, maps);
+    const eventAt = text(resolvedVote.firstVotedAt);
     const eventMs = Date.parse(eventAt);
     if (!Number.isFinite(eventMs)) continue;
     if (eventMs < windowStartMs || eventMs > generatedAtMs) continue;
 
-    const headingId = text(vote.headingId);
+    const headingId = text(resolvedVote.headingId);
     if (!headingId) continue;
 
-    if (!recentMap.has(headingId)) recentMap.set(headingId, createAggregateItem(vote));
+    if (!recentMap.has(headingId)) recentMap.set(headingId, createAggregateItem(resolvedVote));
 
     const item = recentMap.get(headingId);
-    backfillAggregateMetadata(item, vote, videoMetadataMap.get(text(item.videoId)) || {});
+    backfillAggregateMetadata(item, resolvedVote, maps.byVideoId.get(text(item.videoId)) || {});
     item.voteCount += 1;
     if (eventAt < text(item.firstVotedAt)) item.firstVotedAt = eventAt;
     if (eventAt > text(item.lastVotedAt)) item.lastVotedAt = eventAt;
@@ -239,37 +429,39 @@ function buildRecentUploadRecommendations(rankingItems, generatedAtIso) {
 }
 
 function buildAggregatesFromVotes(votes, generatedAt, videoMetadataMap = new Map()) {
+  const maps = ensureVideoMetadataMaps(videoMetadataMap);
   const ranking = new Map();
   const weekly = new Map();
 
   for (const vote of votes) {
-    const headingId = text(vote.headingId);
+    const resolvedVote = resolveVoteMetadata(vote, maps);
+    const headingId = text(resolvedVote.headingId);
     if (!headingId) continue;
 
-    if (!ranking.has(headingId)) ranking.set(headingId, createAggregateItem(vote));
+    if (!ranking.has(headingId)) ranking.set(headingId, createAggregateItem(resolvedVote));
     const item = ranking.get(headingId);
-    backfillAggregateMetadata(item, vote, videoMetadataMap.get(text(item.videoId)) || {});
+    backfillAggregateMetadata(item, resolvedVote, maps.byVideoId.get(text(item.videoId)) || {});
     item.voteCount += 1;
-    if (text(vote.firstVotedAt) < text(item.firstVotedAt)) item.firstVotedAt = text(vote.firstVotedAt);
-    if (text(vote.firstVotedAt) > text(item.lastVotedAt)) item.lastVotedAt = text(vote.firstVotedAt);
+    if (text(resolvedVote.firstVotedAt) < text(item.firstVotedAt)) item.firstVotedAt = text(resolvedVote.firstVotedAt);
+    if (text(resolvedVote.firstVotedAt) > text(item.lastVotedAt)) item.lastVotedAt = text(resolvedVote.firstVotedAt);
 
-    const weekKey = text(vote.weekKey) || weekKeyJstFromIso(text(vote.firstVotedAt));
+    const weekKey = text(resolvedVote.weekKey) || weekKeyJstFromIso(text(resolvedVote.firstVotedAt));
     if (!weekly.has(weekKey)) weekly.set(weekKey, new Map());
     const weekMap = weekly.get(weekKey);
-    if (!weekMap.has(headingId)) weekMap.set(headingId, createAggregateItem(vote));
+    if (!weekMap.has(headingId)) weekMap.set(headingId, createAggregateItem(resolvedVote));
     const weekItem = weekMap.get(headingId);
-    backfillAggregateMetadata(weekItem, vote, videoMetadataMap.get(text(weekItem.videoId)) || {});
+    backfillAggregateMetadata(weekItem, resolvedVote, maps.byVideoId.get(text(weekItem.videoId)) || {});
     weekItem.voteCount += 1;
-    if (text(vote.firstVotedAt) < text(weekItem.firstVotedAt)) weekItem.firstVotedAt = text(vote.firstVotedAt);
-    if (text(vote.firstVotedAt) > text(weekItem.lastVotedAt)) weekItem.lastVotedAt = text(vote.firstVotedAt);
+    if (text(resolvedVote.firstVotedAt) < text(weekItem.firstVotedAt)) weekItem.firstVotedAt = text(resolvedVote.firstVotedAt);
+    if (text(resolvedVote.firstVotedAt) > text(weekItem.lastVotedAt)) weekItem.lastVotedAt = text(resolvedVote.firstVotedAt);
   }
 
   for (const item of ranking.values()) {
-    backfillAggregateMetadata(item, {}, videoMetadataMap.get(text(item.videoId)) || {});
+    backfillAggregateMetadata(item, {}, maps.byVideoId.get(text(item.videoId)) || {});
   }
   for (const map of weekly.values()) {
     for (const item of map.values()) {
-      backfillAggregateMetadata(item, {}, videoMetadataMap.get(text(item.videoId)) || {});
+      backfillAggregateMetadata(item, {}, maps.byVideoId.get(text(item.videoId)) || {});
     }
   }
 
@@ -283,7 +475,7 @@ function buildAggregatesFromVotes(votes, generatedAt, videoMetadataMap = new Map
     return text(a.headingId).localeCompare(text(b.headingId));
   });
 
-  const recentItems = buildRecentRecommendations(votes, generatedAt, 240, videoMetadataMap);
+  const recentItems = buildRecentRecommendations(votes, generatedAt, 240, maps);
   const recentUploadItems = buildRecentUploadRecommendations(sorted, generatedAt);
   return { sorted, weekly, recentItems, recentUploadItems };
 }
@@ -297,6 +489,15 @@ function canonicalVoteMetadata(receivedAtIso, payloadTimestamp) {
   const clientTimestamp = text(payloadTimestamp);
   if (clientTimestamp) metadata.clientTimestamp = clientTimestamp;
   return metadata;
+}
+
+function hasCompleteMetadata(payload) {
+  return !!(
+    text(payload?.videoId)
+    && (text(payload?.publishedAt) || text(payload?.videoDate))
+    && (text(payload?.sourceVideoTitle) || text(payload?.videoTitle))
+    && text(payload?.sourceVideoUrl)
+  );
 }
 
 async function hmacSha256Hex(secret, message) {
@@ -396,22 +597,58 @@ async function writeVote(request, env) {
   }
 
   const voteMeta = canonicalVoteMetadata(receivedAt, payload?.timestamp);
-  const body = {
+  const rawPayload = {
     headingId,
-    clientHash,
     videoId: text(payload?.videoId),
     headingTitle: text(payload?.headingTitle),
     videoTitle: text(payload?.videoTitle),
+    sourceVideoTitle: text(payload?.sourceVideoTitle),
+    sourceVideoUrl: text(payload?.sourceVideoUrl) || text(payload?.videoUrl),
     headingStart: text(payload?.headingStart),
     sourceMode: text(payload?.sourceMode) || "unknown",
-    sourceVideoUrl: text(payload?.sourceVideoUrl) || text(payload?.videoUrl),
-    sourceVideoTitle: text(payload?.sourceVideoTitle),
     publishedAt: text(payload?.publishedAt),
+    videoDate: text(payload?.videoDate),
+  };
+
+  let resolvedPayload = {
+    ...rawPayload,
+    metadataIncomplete: false,
+    metadataIncompleteReason: [],
+  };
+  if (!hasCompleteMetadata(rawPayload)) {
+    const talksPayload = await readJsonObject(env.FAVORITES_BUCKET, "index/talks.json");
+    const latestPayload = await readJsonObject(env.FAVORITES_BUCKET, "index/latest.json");
+    const metadataMaps = buildVideoMetadataMaps(talksPayload || {}, latestPayload || {});
+    resolvedPayload = resolveVoteMetadata(rawPayload, metadataMaps);
+  }
+
+  const body = {
+    headingId: resolvedPayload.headingId,
+    clientHash,
+    videoId: resolvedPayload.videoId,
+    headingTitle: resolvedPayload.headingTitle,
+    videoTitle: resolvedPayload.videoTitle,
+    headingStart: resolvedPayload.headingStart,
+    sourceMode: resolvedPayload.sourceMode,
+    sourceVideoUrl: resolvedPayload.sourceVideoUrl,
+    sourceVideoTitle: resolvedPayload.sourceVideoTitle,
+    publishedAt: resolvedPayload.publishedAt,
+    videoDate: resolvedPayload.videoDate,
     firstVotedAt: voteMeta.firstVotedAt,
     weekKey: voteMeta.weekKey,
     ipHash,
     uaHash,
   };
+  if (resolvedPayload.metadataIncomplete) {
+    body.metadataIncomplete = true;
+    body.metadataIncompleteReason = Array.isArray(resolvedPayload.metadataIncompleteReason)
+      ? resolvedPayload.metadataIncompleteReason
+      : [];
+    console.warn("[favorites] metadata incomplete vote saved", {
+      headingId: body.headingId,
+      reasons: body.metadataIncompleteReason,
+    });
+  }
   if (voteMeta.clientTimestamp) body.clientTimestamp = voteMeta.clientTimestamp;
 
   await env.FAVORITES_BUCKET.put(key, JSON.stringify(body), {
@@ -445,7 +682,7 @@ async function rebuildAggregates(request, env) {
   const generatedAt = new Date().toISOString();
   const talksPayload = await readJsonObject(env.FAVORITES_BUCKET, "index/talks.json");
   const latestPayload = await readJsonObject(env.FAVORITES_BUCKET, "index/latest.json");
-  const videoMetadataMap = buildVideoMetadataMap(talksPayload || {}, latestPayload || {});
+  const videoMetadataMap = buildVideoMetadataMaps(talksPayload || {}, latestPayload || {});
   const { sorted, weekly, recentItems, recentUploadItems } = buildAggregatesFromVotes(votes, generatedAt, videoMetadataMap);
 
   const allTime = { generatedAt, source: "favorites/unique", items: sorted };
@@ -532,7 +769,12 @@ export {
   previousCompletedWeekKeyFromIso,
   buildRecentRecommendations,
   buildRecentUploadRecommendations,
+  normalizeTitle,
+  extractYouTubeVideoId,
+  canonicalizeYouTubeUrl,
+  buildVideoMetadataMaps,
   buildVideoMetadataMap,
+  resolveVoteMetadata,
   buildAggregatesFromVotes,
   hashWithSecret,
   canonicalVoteMetadata,
