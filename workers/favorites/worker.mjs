@@ -82,6 +82,15 @@ function isValidYouTubeVideoId(value) {
   return /^[a-zA-Z0-9_-]{11}$/.test(text(value));
 }
 
+function pickFirstValidDate(...candidates) {
+  for (const candidate of candidates) {
+    const raw = text(candidate);
+    if (!raw) continue;
+    if (parsePublishedAt(raw) !== null) return raw;
+  }
+  return "";
+}
+
 function normalizeVotePayload(vote) {
   const normalized = {
     ...vote,
@@ -101,8 +110,8 @@ function normalizeVotePayload(vote) {
     ? normalized.videoId
     : (isValidYouTubeVideoId(extractedVideoId) ? extractedVideoId : "");
   const canonicalSourceVideoUrl = canonicalVideoId ? canonicalizeYouTubeUrl(canonicalVideoId) : "";
-  const canonicalPublishedAt = normalized.publishedAt || normalized.videoDate;
-  const canonicalVideoDate = normalized.videoDate || normalized.publishedAt;
+  const canonicalPublishedAt = pickFirstValidDate(normalized.publishedAt, normalized.videoDate);
+  const canonicalVideoDate = pickFirstValidDate(normalized.videoDate, normalized.publishedAt);
   const canonicalVideoTitle = normalized.videoTitle || normalized.sourceVideoTitle;
   const canonicalSourceVideoTitle = normalized.sourceVideoTitle || normalized.videoTitle;
   return {
@@ -199,8 +208,8 @@ function buildVideoMetadataMaps(talksPayload, latestPayload) {
       videoId,
       title: text(next.title) || text(existing.title),
       url: text(next.url) || text(existing.url),
-      publishedAt: text(next.publishedAt) || text(existing.publishedAt),
-      videoDate: text(next.videoDate) || text(existing.videoDate) || text(next.publishedAt) || text(existing.publishedAt),
+      publishedAt: pickFirstValidDate(next.publishedAt, existing.publishedAt),
+      videoDate: pickFirstValidDate(next.videoDate, existing.videoDate, next.publishedAt, existing.publishedAt),
     };
     byVideoId.set(videoId, merged);
     if (merged.url) byCanonicalUrl.set(merged.url, merged);
@@ -322,8 +331,18 @@ function resolveVoteMetadata(vote, mapsOrMap, rawInput = vote) {
   const meta = resolvedMeta || {};
   const resolvedVideoId = normalizedVote.videoId || (isValidYouTubeVideoId(extractedFromUrl) ? extractedFromUrl : "") || text(meta.videoId);
   const resolvedUrl = canonicalizeYouTubeUrl(resolvedVideoId) || text(meta.url);
-  const resolvedPublishedAt = normalizedVote.publishedAt || normalizedVote.videoDate || text(meta.publishedAt) || text(meta.videoDate);
-  const resolvedVideoDate = normalizedVote.videoDate || normalizedVote.publishedAt || text(meta.videoDate) || text(meta.publishedAt);
+  const resolvedPublishedAt = pickFirstValidDate(
+    normalizedVote.publishedAt,
+    normalizedVote.videoDate,
+    meta.publishedAt,
+    meta.videoDate,
+  );
+  const resolvedVideoDate = pickFirstValidDate(
+    normalizedVote.videoDate,
+    normalizedVote.publishedAt,
+    meta.videoDate,
+    meta.publishedAt,
+  );
   const resolvedVideoTitle = normalizedVote.videoTitle || text(meta.title);
   const resolvedSourceVideoTitle = normalizedVote.sourceVideoTitle || resolvedVideoTitle || text(meta.title);
 
@@ -376,12 +395,8 @@ function backfillAggregateMetadata(item, vote = {}, meta = {}) {
   if (!text(item.sourceVideoUrl) && text(vote.videoUrl)) item.sourceVideoUrl = text(vote.videoUrl);
   if (!text(item.sourceVideoUrl) && text(meta.url)) item.sourceVideoUrl = text(meta.url);
   if (!text(item.headingStart) && text(vote.headingStart)) item.headingStart = text(vote.headingStart);
-  if (!text(item.publishedAt) && text(vote.publishedAt)) item.publishedAt = text(vote.publishedAt);
-  if (!text(item.publishedAt) && text(vote.videoDate)) item.publishedAt = text(vote.videoDate);
-  if (!text(item.publishedAt) && text(meta.publishedAt)) item.publishedAt = text(meta.publishedAt);
-  if (!text(item.videoDate) && text(vote.videoDate)) item.videoDate = text(vote.videoDate);
-  if (!text(item.videoDate) && text(vote.publishedAt)) item.videoDate = text(vote.publishedAt);
-  if (!text(item.videoDate) && text(meta.publishedAt)) item.videoDate = text(meta.publishedAt);
+  item.publishedAt = pickFirstValidDate(item.publishedAt, vote.publishedAt, vote.videoDate, meta.publishedAt, meta.videoDate);
+  item.videoDate = pickFirstValidDate(item.videoDate, vote.videoDate, vote.publishedAt, meta.videoDate, meta.publishedAt);
   if (!text(item.sourceMode) && text(vote.sourceMode)) item.sourceMode = text(vote.sourceMode);
 }
 
@@ -821,6 +836,7 @@ export {
   normalizeTitle,
   extractYouTubeVideoId,
   canonicalizeYouTubeUrl,
+  normalizeVotePayload,
   buildVideoMetadataMaps,
   buildVideoMetadataMap,
   resolveVoteMetadata,

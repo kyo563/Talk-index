@@ -11,6 +11,7 @@ import {
   resolveVoteMetadata,
   canonicalizeYouTubeUrl,
   buildAggregatesFromVotes,
+  normalizeVotePayload,
   hashWithSecret,
   canonicalVoteMetadata,
   default as worker,
@@ -260,6 +261,48 @@ test('rebuild: 補完後に recent_upload_recommendations に残る', () => {
   assert.deepEqual(recentUploadItems.map((item) => item.headingId), ['h-up']);
 });
 
+test('resolveVoteMetadata: raw publishedAt が invalid でも meta の valid date を優先する', () => {
+  const maps = buildVideoMetadataMaps(
+    { talks: [{ date: '2026-04-20', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=meta0000001', videoTitle: 'Meta Date' }] }] },
+    {},
+  );
+  const resolved = resolveVoteMetadata(
+    { headingId: 'h-meta-date', videoId: 'meta0000001', publishedAt: 'not-a-date' },
+    maps,
+    { headingId: 'h-meta-date', videoId: 'meta0000001', publishedAt: 'not-a-date' },
+  );
+  assert.equal(resolved.publishedAt, '2026-04-20');
+  assert.equal(resolved.metadataIncompleteReason.includes('invalid_published_at'), true);
+});
+
+test('normalizeVotePayload: publishedAt invalid / videoDate valid なら videoDate を採用する', () => {
+  const normalized = normalizeVotePayload({
+    headingId: 'h-norm-date',
+    publishedAt: 'not-a-date',
+    videoDate: '2026-04-20',
+  });
+  assert.equal(normalized.publishedAt, '2026-04-20');
+  assert.equal(normalized.videoDate, '2026-04-20');
+});
+
+test('rebuild: 既存 vote の invalid publishedAt は metadata map で修復される', () => {
+  const maps = buildVideoMetadataMaps(
+    { talks: [{ date: '2026-04-22', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=fixdate0001', videoTitle: 'Fix Date' }] }] },
+    {},
+  );
+  const votes = [
+    {
+      headingId: 'h-fix-date',
+      videoId: 'fixdate0001',
+      firstVotedAt: '2026-04-23T00:00:00+09:00',
+      publishedAt: 'not-a-date',
+    },
+  ];
+  const { sorted, recentUploadItems } = buildAggregatesFromVotes(votes, '2026-04-23T00:00:00+09:00', maps);
+  assert.equal(sorted[0].publishedAt, '2026-04-22');
+  assert.deepEqual(recentUploadItems.map((item) => item.headingId), ['h-fix-date']);
+});
+
 function createMemoryBucket(seed = {}) {
   const store = new Map(Object.entries(seed));
   return {
@@ -423,9 +466,11 @@ test('write: invalid videoId は complete 扱いで素通ししない', async ()
   assert.deepEqual(saved.metadataIncompleteReason, ['invalid_video_id', 'url_unparseable']);
 });
 
-test('write: invalid publishedAt は complete 扱いで素通ししない', async () => {
+test('write: invalid publishedAt + metadata あり なら保存値は valid date に補正する', async () => {
   const bucket = createMemoryBucket({
-    'index/talks.json': JSON.stringify({ talks: [] }),
+    'index/talks.json': JSON.stringify({
+      talks: [{ date: '2026-04-20', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=abc123def45', videoTitle: 'Date NG' }] }],
+    }),
     'index/latest.json': JSON.stringify({ items: [] }),
   });
   const env = { FAVORITES_BUCKET: bucket, FAVORITES_HASH_SECRET: 'secret', FAVORITES_ADMIN_TOKEN: 'admin' };
@@ -444,7 +489,34 @@ test('write: invalid publishedAt は complete 扱いで素通ししない', asyn
   await worker.fetch(req, env);
   const saved = await readStoredVote(bucket, 'h-invalid-date');
   assert.equal(saved.metadataIncomplete, true);
-  assert.equal(saved.publishedAt, 'not-a-date');
+  assert.equal(saved.publishedAt, '2026-04-20');
+  assert.equal(saved.metadataIncompleteReason.includes('invalid_published_at'), true);
+});
+
+test('write: publishedAt/videoDate も invalid かつ meta 無しなら修復不能のまま保存される', async () => {
+  const bucket = createMemoryBucket({
+    'index/talks.json': JSON.stringify({ talks: [] }),
+    'index/latest.json': JSON.stringify({ items: [] }),
+  });
+  const env = { FAVORITES_BUCKET: bucket, FAVORITES_HASH_SECRET: 'secret', FAVORITES_ADMIN_TOKEN: 'admin' };
+  const req = new Request('https://example.com/favorites/vote', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      headingId: 'h-invalid-date-unrecoverable',
+      clientId: 'c7b',
+      videoId: 'abc123def45',
+      sourceVideoUrl: 'https://www.youtube.com/watch?v=abc123def45',
+      sourceVideoTitle: 'Date NG2',
+      publishedAt: 'not-a-date',
+      videoDate: 'still-not-a-date',
+    }),
+  });
+  await worker.fetch(req, env);
+  const saved = await readStoredVote(bucket, 'h-invalid-date-unrecoverable');
+  assert.equal(saved.metadataIncomplete, true);
+  assert.equal(saved.publishedAt, '');
+  assert.equal(saved.videoDate, '');
   assert.equal(saved.metadataIncompleteReason.includes('invalid_published_at'), true);
 });
 

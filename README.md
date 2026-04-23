@@ -166,8 +166,9 @@ npm run ci:build
 - `recent_upload_recommendations` は **generatedAt の JST 日付を基準に、当日を含む直近7日間（6日前〜当日）に公開された動画群**を対象に、対象動画内トークの累計票で集計します（R2は全件保持）
 - metadata 補完優先順位は `videoId -> sourceVideoUrl -> sourceVideoTitle -> videoTitle -> headingId` です（`headingTitle` 単独一致は誤結合防止のため使いません）
 - `sourceVideoTitle` / `videoTitle` は normalize 後の厳密一致のみ使い、重複タイトルは曖昧扱いで不採用にします
-- `POST /favorites/vote` は、payload が十分に見える場合でも保存前に必ず metadata を正規化（trim / URL canonicalize / `videoId` 正規化 / `publishedAt` と `videoDate` 統一 / title 相互補完）してから妥当性確認します
+- `POST /favorites/vote` は、payload が十分に見える場合でも保存前に必ず metadata を正規化（trim / URL canonicalize / `videoId` 正規化 / `publishedAt` と `videoDate` は「最初の妥当な日付」を採用 / title 相互補完）してから妥当性確認します
 - 妥当性確認を通らない場合のみ `index/talks.json` / `index/latest.json` を参照して補完します（不足時のみ index 参照）
+- raw 日付文字列が不正でも metadata map に妥当な投稿日があれば保存値は補正します（`metadataIncompleteReason` には不正入力理由を保持します）
 - 補完後も保存要件を満たせない場合は `metadataIncomplete: true` と `metadataIncompleteReason: string[]` を保存します（例: `missing_video_id`, `invalid_video_id`, `missing_published_at`, `invalid_published_at`, `missing_source_video_url`, `url_unparseable`, `missing_video_title`, `title_ambiguous`, `heading_title_ambiguous`）
 
 ### favorites の実装位置
