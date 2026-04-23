@@ -2,7 +2,6 @@ import { createInvalidJsonShapeError, createTargetFetchError, fetchJsonFromCandi
 import {
   fetchFavoriteRanking,
   fetchHallOfFame,
-  fetchRecentRecommendations,
   fetchRecentUploadRecommendations,
   sendFavoriteVote as sendFavoriteVoteRequest,
 } from "./src/features/favorites.js";
@@ -77,7 +76,7 @@ const state = {
   favoritesDataError: "",
 };
 
-const RECOMMEND_LIMIT = 3;
+const RECOMMEND_LIMIT = 5;
 const NEW_VIDEO_HIGHLIGHT_COUNT = 1;
 const NEW_VIDEO_HIGHLIGHT_SCROLL_SCREENS = 2;
 const VIDEO_AUTO_COLLAPSE_PASSED_COUNT = 2;
@@ -1278,7 +1277,6 @@ async function sendFavoriteVote(payload) {
 
 async function fetchFavoritesAggregate(kind) {
   const loaders = {
-    recent: fetchRecentRecommendations,
     recentUpload: fetchRecentUploadRecommendations,
     hall: fetchHallOfFame,
     ranking: fetchFavoriteRanking,
@@ -1348,13 +1346,11 @@ async function loadFavoritesDataIfNeeded() {
   state.favoritesDataError = "";
   render();
   try {
-    const [recent, recentUpload, hall, ranking] = await Promise.all([
-      fetchFavoritesAggregate("recent"),
+    const [recentUpload, hall, ranking] = await Promise.all([
       fetchFavoritesAggregate("recentUpload"),
       fetchFavoritesAggregate("hall"),
       fetchFavoritesAggregate("ranking"),
     ]);
-    state.favoritesRecent = recent;
     state.favoritesRecentUpload = recentUpload;
     state.favoritesHall = hall;
     state.favoritesCurrentRanking = ranking;
