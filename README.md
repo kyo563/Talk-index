@@ -163,7 +163,7 @@ npm run ci:build
 - hash 方式は Python / Worker 共通で `HMAC-SHA256(secret, "${scope}:${value}")` です
 - `hall_of_fame` は **全期間・全動画・全トークテーマ** を累計票で集計します（R2は全件保持）
 - `recent_recommendations` は **generatedAt基準の直近240時間（10日）** の投票イベントだけを再集計します（票が1以上の項目を全件保持）
-- `recent_upload_recommendations` は **generatedAt基準の直近168時間（7日）以内に公開された動画群**を対象に、対象動画内トークの累計票で集計します（R2は全件保持）
+- `recent_upload_recommendations` は **generatedAt の JST 日付を基準に、当日を含む直近7日間（6日前〜当日）に公開された動画群**を対象に、対象動画内トークの累計票で集計します（R2は全件保持）
 
 ### favorites の実装位置
 
@@ -224,7 +224,7 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
 - `お気に入り集計（全期間）`（毎回全置換）
 - `殿堂入りトーク（内部）`（毎回全置換、全件）
 - `10日間のおすすめトーク（内部）`（毎回全置換、generatedAt基準の直近240時間の票を全件）
-- `直近の動画のおすすめ（内部）`（毎回全置換、generatedAt基準の過去168時間以内公開動画を累計票で全件）
+- `直近の動画のおすすめ（内部）`（毎回全置換、generatedAt の JST 日付基準で当日を含む直近7日間に公開された動画を累計票で全件）
 - `日次スナップショット（内部）`（`snapshotDate + headingId` をキーに upsert / 履歴保持）
 - 公開用別スプレッドシート（`PUBLIC_FAVORITES_SPREADSHEET_ID`）:
   - `殿堂入りトーク`（毎回全置換）

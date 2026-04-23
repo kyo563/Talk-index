@@ -195,17 +195,35 @@ function parsePublishedAt(value) {
   return ms;
 }
 
-function buildRecentUploadRecommendations(rankingItems, generatedAtIso, windowHours = 168) {
-  const generatedAtMs = Date.parse(text(generatedAtIso));
-  if (!Number.isFinite(generatedAtMs)) return [];
-  const windowStartMs = generatedAtMs - windowHours * 60 * 60 * 1000;
+function toJstDateString(value) {
+  const raw = text(value);
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  return jstDateFromIso(raw);
+}
+
+function shiftDateString(dateString, diffDays) {
+  const raw = text(dateString);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return "";
+  const date = new Date(`${raw}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + diffDays);
+  return date.toISOString().slice(0, 10);
+}
+
+function buildRecentUploadRecommendations(rankingItems, generatedAtIso) {
+  const generatedAtJstDate = toJstDateString(generatedAtIso);
+  if (!generatedAtJstDate) return [];
+  const windowStartDate = shiftDateString(generatedAtJstDate, -6);
+  if (!windowStartDate) return [];
+
   const items = (Array.isArray(rankingItems) ? rankingItems : [])
     .map((item) => {
       const publishedAt = text(item?.publishedAt) || text(item?.videoDate);
-      const publishedAtMs = parsePublishedAt(publishedAt);
-      if (!Number.isFinite(publishedAtMs)) return null;
-      if (publishedAtMs < windowStartMs || publishedAtMs > generatedAtMs) return null;
-      return { ...item, publishedAt, publishedAtMs };
+      const publishedAtJstDate = toJstDateString(publishedAt);
+      if (!publishedAtJstDate) return null;
+      if (publishedAtJstDate < windowStartDate || publishedAtJstDate > generatedAtJstDate) return null;
+      const publishedAtMs = parsePublishedAt(publishedAtJstDate);
+      return { ...item, publishedAt, publishedAtMs, publishedAtJstDate };
     })
     .filter(Boolean);
 
@@ -217,7 +235,7 @@ function buildRecentUploadRecommendations(rankingItems, generatedAtIso, windowHo
     return text(a.headingId).localeCompare(text(b.headingId));
   });
 
-  return items.map(({ publishedAtMs, ...item }) => item);
+  return items.map(({ publishedAtMs, publishedAtJstDate, ...item }) => item);
 }
 
 function buildAggregatesFromVotes(votes, generatedAt, videoMetadataMap = new Map()) {
@@ -266,7 +284,7 @@ function buildAggregatesFromVotes(votes, generatedAt, videoMetadataMap = new Map
   });
 
   const recentItems = buildRecentRecommendations(votes, generatedAt, 240, videoMetadataMap);
-  const recentUploadItems = buildRecentUploadRecommendations(sorted, generatedAt, 168);
+  const recentUploadItems = buildRecentUploadRecommendations(sorted, generatedAt);
   return { sorted, weekly, recentItems, recentUploadItems };
 }
 
