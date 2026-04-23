@@ -1306,12 +1306,22 @@ async function syncFavoriteVote(headingId, sourceTalk = null) {
     return true;
   }
   const talk = sourceTalk || findTalkByHeadingId(normalized);
+  const sourceVideoUrl = text(talk?.subsections?.[0]?.videoUrl || talk?.videoUrl);
+  const sourceVideoTitle = text(talk?.subsections?.[0]?.videoTitle || talk?.videoTitle);
+  const videoId = text(talk?.videoId) || extractYoutubeVideoId(sourceVideoUrl);
+  const publishedAt = parseDateValue(text(talk?.date || talk?.publishedAt || talk?.videoDate));
+  const headingStart = text(talk?.headingStart || talk?.sectionUrl || talk?.url);
   try {
     await sendFavoriteVote({
       headingId: normalized,
       headingTitle: text(talk?.name || talk?.headingTitle || normalized),
-      videoId: text(talk?.videoId),
-      videoTitle: text(talk?.subsections?.[0]?.videoTitle || talk?.videoTitle),
+      videoId,
+      videoTitle: sourceVideoTitle,
+      sourceVideoTitle,
+      sourceVideoUrl,
+      publishedAt,
+      videoDate: publishedAt,
+      headingStart,
       sourceMode: state.viewMode,
       clientId: ensureFavoritesClientId(),
       timestamp: new Date().toISOString(),

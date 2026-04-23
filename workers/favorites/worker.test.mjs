@@ -6,10 +6,14 @@ import {
   weekKeyJstFromIso,
   buildRecentRecommendations,
   buildRecentUploadRecommendations,
+  buildVideoMetadataMaps,
   buildVideoMetadataMap,
+  resolveVoteMetadata,
+  canonicalizeYouTubeUrl,
   buildAggregatesFromVotes,
   hashWithSecret,
   canonicalVoteMetadata,
+  default as worker,
 } from './worker.mjs';
 
 test('recent_recommendations は generatedAt 基準の直近240時間投票で再集計する', () => {
@@ -135,7 +139,7 @@ test('aggregate は後続 vote の metadata で backfill する', () => {
   const { sorted } = buildAggregatesFromVotes(votes, '2026-04-22T00:00:00Z');
   assert.equal(sorted[0].videoTitle, 'Video One');
   assert.equal(sorted[0].sourceVideoTitle, 'Source One');
-  assert.equal(sorted[0].sourceVideoUrl, 'https://youtube.com/watch?v=vid-1');
+  assert.equal(sorted[0].sourceVideoUrl, 'https://www.youtube.com/watch?v=vid-1');
   assert.equal(sorted[0].publishedAt, '2026-04-19');
 });
 
@@ -190,6 +194,206 @@ test('legacy vote でも talks/latest metadata map から復元できる', () =>
   assert.equal(sorted[0].sourceVideoUrl, 'https://www.youtube.com/watch?v=legacy-1');
   assert.equal(sorted[0].publishedAt, '2026-04-20');
   assert.equal(recentUploadItems.length, 1);
+});
+
+test('rebuild: videoId 欠落でも sourceVideoUrl から復元できる', () => {
+  const maps = buildVideoMetadataMaps(
+    { talks: [{ date: '2026-04-20', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=abc123def45', videoTitle: 'From URL' }] }] },
+    {},
+  );
+  const resolved = resolveVoteMetadata({ headingId: 'h-url', sourceVideoUrl: 'https://youtu.be/abc123def45?t=10' }, maps);
+  assert.equal(resolved.videoId, 'abc123def45');
+  assert.equal(resolved.publishedAt, '2026-04-20');
+  assert.equal(resolved.sourceVideoUrl, canonicalizeYouTubeUrl('abc123def45'));
+});
+
+test('rebuild: sourceVideoTitle から復元できる', () => {
+  const maps = buildVideoMetadataMaps(
+    { talks: [{ date: '2026-04-19', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=title000001', videoTitle: '  タイトル　A  ' }] }] },
+    {},
+  );
+  const resolved = resolveVoteMetadata({ headingId: 'h-title', sourceVideoTitle: 'タイトルA' }, maps);
+  assert.equal(resolved.videoId, 'title000001');
+  assert.equal(resolved.publishedAt, '2026-04-19');
+});
+
+test('rebuild: videoTitle から復元できる', () => {
+  const maps = buildVideoMetadataMaps(
+    { talks: [{ date: '2026-04-18', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=title000002', videoTitle: 'Video Match' }] }] },
+    {},
+  );
+  const resolved = resolveVoteMetadata({ headingId: 'h-video-title', videoTitle: 'Video Match' }, maps);
+  assert.equal(resolved.videoId, 'title000002');
+  assert.equal(resolved.publishedAt, '2026-04-18');
+});
+
+test('rebuild: 曖昧一致をせず重複 title は解決しない', () => {
+  const maps = buildVideoMetadataMaps(
+    { talks: [{ date: '2026-04-18', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=dup00000001', videoTitle: 'SameTitle' }, { videoUrl: 'https://www.youtube.com/watch?v=dup00000002', videoTitle: 'SameTitle' }] }] },
+    {},
+  );
+  const resolved = resolveVoteMetadata({ headingId: 'h-dup', sourceVideoTitle: 'SameTitle' }, maps);
+  assert.equal(resolved.videoId, '');
+  assert.equal(resolved.metadataIncomplete, true);
+  assert.deepEqual(resolved.metadataIncompleteReason, ['missing_video_id', 'missing_published_at', 'missing_source_video_url', 'title_ambiguous']);
+});
+
+test('rebuild: headingTitle 単独一致では解決しない', () => {
+  const maps = buildVideoMetadataMaps(
+    { talks: [{ headingId: 'h-1', name: '雑談', date: '2026-04-18', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=solohead001', videoTitle: 'A' }] }] },
+    {},
+  );
+  const resolved = resolveVoteMetadata({ headingId: 'h-x', headingTitle: '雑談' }, maps);
+  assert.equal(resolved.videoId, '');
+  assert.equal(resolved.metadataIncomplete, true);
+});
+
+test('rebuild: 補完後に recent_upload_recommendations に残る', () => {
+  const maps = buildVideoMetadataMaps(
+    { talks: [{ date: '2026-04-22', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=up000000001', videoTitle: 'Upload Target' }] }] },
+    {},
+  );
+  const votes = [
+    { headingId: 'h-up', firstVotedAt: '2026-04-23T00:00:00+09:00', sourceVideoUrl: 'https://youtube.com/watch?v=up000000001&list=x' },
+  ];
+  const { recentUploadItems } = buildAggregatesFromVotes(votes, '2026-04-23T00:00:00+09:00', maps);
+  assert.deepEqual(recentUploadItems.map((item) => item.headingId), ['h-up']);
+});
+
+function createMemoryBucket(seed = {}) {
+  const store = new Map(Object.entries(seed));
+  return {
+    async get(key) {
+      if (!store.has(key)) return null;
+      const value = store.get(key);
+      return {
+        async text() { return value; },
+        body: value,
+        writeHttpMetadata() {},
+      };
+    },
+    async put(key, value) {
+      store.set(key, String(value));
+    },
+    async list({ prefix = '' } = {}) {
+      const objects = Array.from(store.keys())
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => ({ key }));
+      return { objects, truncated: false, cursor: undefined };
+    },
+    dump() {
+      return store;
+    },
+  };
+}
+
+async function readStoredVote(bucket, headingId) {
+  const listed = await bucket.list({ prefix: `favorites/unique/${encodeURIComponent(headingId)}/` });
+  const key = listed.objects[0]?.key;
+  const object = key ? await bucket.get(key) : null;
+  return object ? JSON.parse(await object.text()) : null;
+}
+
+test('write: talk mode で videoId / URL / publishedAt を保存する', async () => {
+  const bucket = createMemoryBucket({
+    'index/talks.json': JSON.stringify({
+      talks: [{ headingId: 'h-talk', name: 'Talk Heading', date: '2026-04-20', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=talk0000001', videoTitle: 'Talk Video' }] }],
+    }),
+    'index/latest.json': JSON.stringify({ items: [] }),
+  });
+  const env = { FAVORITES_BUCKET: bucket, FAVORITES_HASH_SECRET: 'secret', FAVORITES_ADMIN_TOKEN: 'admin' };
+  const req = new Request('https://example.com/favorites/vote', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ headingId: 'h-talk', clientId: 'c1', sourceMode: 'talk', headingTitle: 'Talk Heading' }),
+  });
+  const res = await worker.fetch(req, env);
+  assert.equal(res.status, 200);
+  const saved = await readStoredVote(bucket, 'h-talk');
+  assert.equal(saved.videoId, 'talk0000001');
+  assert.equal(saved.sourceVideoUrl, 'https://www.youtube.com/watch?v=talk0000001');
+  assert.equal(saved.publishedAt, '2026-04-20');
+});
+
+test('write: video mode でも videoId / URL / publishedAt を保存する', async () => {
+  const bucket = createMemoryBucket({
+    'index/talks.json': JSON.stringify({ talks: [] }),
+    'index/latest.json': JSON.stringify({ items: [{ id: 'vid00000001', title: 'Video Mode', date: '2026-04-21', url: 'https://youtu.be/vid00000001' }] }),
+  });
+  const env = { FAVORITES_BUCKET: bucket, FAVORITES_HASH_SECRET: 'secret', FAVORITES_ADMIN_TOKEN: 'admin' };
+  const req = new Request('https://example.com/favorites/vote', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ headingId: 'h-video', clientId: 'c2', sourceMode: 'video', sourceVideoTitle: 'Video Mode' }),
+  });
+  await worker.fetch(req, env);
+  const saved = await readStoredVote(bucket, 'h-video');
+  assert.equal(saved.videoId, 'vid00000001');
+  assert.equal(saved.sourceVideoUrl, 'https://www.youtube.com/watch?v=vid00000001');
+  assert.equal(saved.publishedAt, '2026-04-21');
+});
+
+test('write: 欠損 payload でも URL から worker 側補完できる', async () => {
+  const bucket = createMemoryBucket({
+    'index/talks.json': JSON.stringify({ talks: [{ date: '2026-04-22', subsections: [{ videoUrl: 'https://www.youtube.com/watch?v=fill0000001', videoTitle: 'Fill' }] }] }),
+    'index/latest.json': JSON.stringify({ items: [] }),
+  });
+  const env = { FAVORITES_BUCKET: bucket, FAVORITES_HASH_SECRET: 'secret', FAVORITES_ADMIN_TOKEN: 'admin' };
+  const req = new Request('https://example.com/favorites/vote', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ headingId: 'h-fill', clientId: 'c3', sourceVideoUrl: 'https://youtu.be/fill0000001?t=5' }),
+  });
+  await worker.fetch(req, env);
+  const saved = await readStoredVote(bucket, 'h-fill');
+  assert.equal(saved.videoId, 'fill0000001');
+  assert.equal(saved.publishedAt, '2026-04-22');
+});
+
+test('write: 解決不能な payload は metadataIncomplete=true で保存する', async () => {
+  const bucket = createMemoryBucket({
+    'index/talks.json': JSON.stringify({ talks: [] }),
+    'index/latest.json': JSON.stringify({ items: [] }),
+  });
+  const env = { FAVORITES_BUCKET: bucket, FAVORITES_HASH_SECRET: 'secret', FAVORITES_ADMIN_TOKEN: 'admin' };
+  const req = new Request('https://example.com/favorites/vote', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ headingId: 'h-incomplete', clientId: 'c4', sourceMode: 'talk' }),
+  });
+  await worker.fetch(req, env);
+  const saved = await readStoredVote(bucket, 'h-incomplete');
+  assert.equal(saved.metadataIncomplete, true);
+  assert.deepEqual(saved.metadataIncompleteReason, ['missing_video_id', 'missing_published_at', 'missing_video_title', 'missing_source_video_url']);
+});
+
+test('write: payload が十分なら index を読まず保存する', async () => {
+  const bucket = createMemoryBucket();
+  const originalGet = bucket.get;
+  bucket.get = async (key) => {
+    if (key === 'index/talks.json' || key === 'index/latest.json') {
+      throw new Error('index should not be read');
+    }
+    return originalGet.call(bucket, key);
+  };
+  const env = { FAVORITES_BUCKET: bucket, FAVORITES_HASH_SECRET: 'secret', FAVORITES_ADMIN_TOKEN: 'admin' };
+  const req = new Request('https://example.com/favorites/vote', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      headingId: 'h-direct',
+      clientId: 'c5',
+      videoId: 'direct000001',
+      sourceVideoUrl: 'https://www.youtube.com/watch?v=direct000001',
+      sourceVideoTitle: 'Direct Vote',
+      publishedAt: '2026-04-20',
+      sourceMode: 'talk',
+    }),
+  });
+  const res = await worker.fetch(req, env);
+  assert.equal(res.status, 200);
+  const saved = await readStoredVote(bucket, 'h-direct');
+  assert.equal(saved.metadataIncomplete, undefined);
 });
 
 test('daily snapshot の JST 日付', () => {
