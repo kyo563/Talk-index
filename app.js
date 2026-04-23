@@ -1297,6 +1297,18 @@ async function fetchFavoritesAggregate(kind) {
   throw (lastError instanceof Error ? lastError : new Error(`favorites aggregate(${kind}) の取得に失敗しました。`));
 }
 
+function resolveVideoFavoriteContext(headingId, sourceContext = null) {
+  if (sourceContext?.video && sourceContext?.section) return sourceContext;
+  const normalized = text(headingId);
+  if (!normalized) return null;
+  for (const video of state.videos) {
+    const sections = Array.isArray(video?.sections) ? video.sections : [];
+    const matched = sections.find((sec) => getHeadingIdFromObject(sec, "") === normalized);
+    if (matched) return { video, section: matched };
+  }
+  return null;
+}
+
 async function syncFavoriteVote(headingId, sourceTalk = null) {
   const normalized = text(headingId);
   if (!normalized || !state.favoritedHeadingIds.has(normalized)) return false;
@@ -1305,24 +1317,68 @@ async function syncFavoriteVote(headingId, sourceTalk = null) {
     saveFavoritesToStorage();
     return true;
   }
-  const talk = sourceTalk || findTalkByHeadingId(normalized);
-  const sourceVideoUrl = text(talk?.subsections?.[0]?.videoUrl || talk?.videoUrl);
-  const sourceVideoTitle = text(talk?.subsections?.[0]?.videoTitle || talk?.videoTitle);
-  const videoId = text(talk?.videoId) || extractYoutubeVideoId(sourceVideoUrl);
-  const publishedAt = parseDateValue(text(talk?.date || talk?.publishedAt || talk?.videoDate));
-  const headingStart = text(talk?.headingStart || talk?.sectionUrl || talk?.url);
+  const isVideoMode = state.viewMode === "video";
+  const videoContext = isVideoMode ? resolveVideoFavoriteContext(normalized, sourceTalk) : null;
+  const talk = isVideoMode ? null : (sourceTalk || findTalkByHeadingId(normalized));
+
+  const sec = videoContext?.section || null;
+  const video = videoContext?.video || null;
+  const sourceVideoUrl = isVideoMode
+    ? text(sec?.sourceVideoUrl || sec?.videoUrl || sec?.url || video?.url)
+    : text(talk?.subsections?.[0]?.videoUrl || talk?.videoUrl);
+  const sourceVideoTitle = isVideoMode
+    ? text(sec?.sourceVideoTitle || sec?.videoTitle || sec?.title || video?.title)
+    : text(talk?.subsections?.[0]?.videoTitle || talk?.videoTitle);
+  const videoTitle = isVideoMode
+    ? text(sec?.videoTitle || sec?.sourceVideoTitle || sec?.title || video?.title || sourceVideoTitle)
+    : sourceVideoTitle;
+  const videoId = isVideoMode
+    ? text(sec?.videoId || sec?.video_id || extractYoutubeVideoId(sourceVideoUrl) || video?.id || extractYoutubeVideoId(video?.url))
+    : (text(talk?.videoId) || extractYoutubeVideoId(sourceVideoUrl));
+  const headingTitle = isVideoMode
+    ? text(sec?.headingTitle || sec?.heading_title || sec?.name || sec?.title)
+    : text(talk?.name || talk?.headingTitle || normalized);
+  const canonicalHeadingId = isVideoMode
+    ? text(sec?.headingId || sec?.heading_id || sec?.id || sec?.key || normalized)
+    : normalized;
+  const publishedFromRaw = isVideoMode
+    ? parseDateValue(text(sec?.publishedAt || sec?.videoDate || video?.publishedAt || video?.date))
+    : parseDateValue(text(talk?.date || talk?.publishedAt || talk?.videoDate));
+  const videoDateFromRaw = isVideoMode
+    ? parseDateValue(text(sec?.videoDate || sec?.publishedAt || video?.date || video?.publishedAt))
+    : publishedFromRaw;
+  const canonicalPublishedAt = publishedFromRaw || videoDateFromRaw;
+  const canonicalVideoDate = videoDateFromRaw || publishedFromRaw;
+  const headingStart = isVideoMode
+    ? text(sec?.headingStart || sec?.heading_start || sec?.sectionUrl || sec?.url)
+    : text(talk?.headingStart || talk?.sectionUrl || talk?.url);
+
+  if (isVideoMode) {
+    const missing = [];
+    if (!videoId) missing.push("videoId");
+    if (!headingTitle) missing.push("headingTitle");
+    if (!(sourceVideoUrl || canonicalPublishedAt)) missing.push("sourceVideoUrl_or_publishedAt");
+    if (missing.length) {
+      console.warn("[favorites] video mode vote skipped due to missing metadata", {
+        headingId: normalized,
+        missing,
+      });
+      return false;
+    }
+  }
+
   try {
     await sendFavoriteVote({
-      headingId: normalized,
-      headingTitle: text(talk?.name || talk?.headingTitle || normalized),
+      headingId: canonicalHeadingId,
+      headingTitle,
       videoId,
-      videoTitle: sourceVideoTitle,
+      videoTitle,
       sourceVideoTitle,
       sourceVideoUrl,
-      publishedAt,
-      videoDate: publishedAt,
+      publishedAt: canonicalPublishedAt,
+      videoDate: canonicalVideoDate,
       headingStart,
-      sourceMode: state.viewMode,
+      sourceMode: isVideoMode ? "video" : state.viewMode,
       clientId: ensureFavoritesClientId(),
       timestamp: new Date().toISOString(),
     });
@@ -1777,8 +1833,11 @@ function renderCards(videos) {
           : createHeadingFormattedSpan(sec.name);
         label.classList.add("section-link");
         const headingId = getHeadingIdFromObject(sec, sec.name);
-        const sourceTalk = findTalkByHeadingId(headingId);
-        const favoriteButton = createFavoriteButton(headingId, "favorite-toggle--section", (id) => toggleFavoriteHeading(id, sourceTalk));
+        const favoriteButton = createFavoriteButton(
+          headingId,
+          "favorite-toggle--section",
+          (id) => toggleFavoriteHeading(id, { video, section: sec }),
+        );
         head.append(toggle, label, favoriteButton);
 
         const subList = document.createElement("ul");
