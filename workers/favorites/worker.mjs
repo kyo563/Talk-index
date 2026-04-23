@@ -78,6 +78,87 @@ function extractYouTubeVideoId(url) {
   return "";
 }
 
+function isValidYouTubeVideoId(value) {
+  return /^[a-zA-Z0-9_-]{11}$/.test(text(value));
+}
+
+function normalizeVotePayload(vote) {
+  const normalized = {
+    ...vote,
+    headingId: text(vote?.headingId),
+    videoId: text(vote?.videoId),
+    headingTitle: text(vote?.headingTitle),
+    videoTitle: text(vote?.videoTitle),
+    sourceVideoTitle: text(vote?.sourceVideoTitle),
+    sourceVideoUrl: text(vote?.sourceVideoUrl) || text(vote?.videoUrl),
+    headingStart: text(vote?.headingStart),
+    publishedAt: text(vote?.publishedAt),
+    videoDate: text(vote?.videoDate),
+    sourceMode: text(vote?.sourceMode) || "unknown",
+  };
+  const extractedVideoId = extractYouTubeVideoId(normalized.sourceVideoUrl);
+  const canonicalVideoId = isValidYouTubeVideoId(normalized.videoId)
+    ? normalized.videoId
+    : (isValidYouTubeVideoId(extractedVideoId) ? extractedVideoId : "");
+  const canonicalSourceVideoUrl = canonicalVideoId ? canonicalizeYouTubeUrl(canonicalVideoId) : "";
+  const canonicalPublishedAt = normalized.publishedAt || normalized.videoDate;
+  const canonicalVideoDate = normalized.videoDate || normalized.publishedAt;
+  const canonicalVideoTitle = normalized.videoTitle || normalized.sourceVideoTitle;
+  const canonicalSourceVideoTitle = normalized.sourceVideoTitle || normalized.videoTitle;
+  return {
+    ...normalized,
+    videoId: canonicalVideoId,
+    sourceVideoUrl: canonicalSourceVideoUrl,
+    publishedAt: canonicalPublishedAt,
+    videoDate: canonicalVideoDate,
+    videoTitle: canonicalVideoTitle,
+    sourceVideoTitle: canonicalSourceVideoTitle,
+  };
+}
+
+function collectMetadataValidationReasons(result, rawInput = {}, maps = null) {
+  const reasons = [];
+  const rawVideoId = text(rawInput?.videoId);
+  if (!rawVideoId) {
+    if (!text(result.videoId)) reasons.push("missing_video_id");
+  } else if (!isValidYouTubeVideoId(rawVideoId)) {
+    reasons.push("invalid_video_id");
+  } else if (!text(result.videoId)) {
+    reasons.push("missing_video_id");
+  }
+
+  const rawPublishedAt = text(rawInput?.publishedAt) || text(rawInput?.videoDate);
+  if (!rawPublishedAt) {
+    if (!(text(result.publishedAt) || text(result.videoDate))) reasons.push("missing_published_at");
+  } else if (!parsePublishedAt(rawPublishedAt)) {
+    reasons.push("invalid_published_at");
+  } else if (!parsePublishedAt(text(result.publishedAt) || text(result.videoDate))) {
+    reasons.push("invalid_published_at");
+  }
+
+  if (!(text(result.sourceVideoTitle) || text(result.videoTitle))) reasons.push("missing_video_title");
+
+  const rawSourceUrl = text(rawInput?.sourceVideoUrl) || text(rawInput?.videoUrl);
+  if (!rawSourceUrl) {
+    if (!text(result.sourceVideoUrl)) reasons.push("missing_source_video_url");
+  } else if (!extractYouTubeVideoId(rawSourceUrl)) {
+    reasons.push("url_unparseable");
+  } else if (!text(result.sourceVideoUrl)) {
+    reasons.push("missing_source_video_url");
+  }
+
+  if (maps) {
+    const sourceTitleKey = normalizeTitle(text(rawInput?.sourceVideoTitle));
+    const videoTitleKey = normalizeTitle(text(rawInput?.videoTitle));
+    if (sourceTitleKey && maps.ambiguousTitles.has(sourceTitleKey)) reasons.push("title_ambiguous");
+    if (videoTitleKey && maps.ambiguousTitles.has(videoTitleKey)) reasons.push("title_ambiguous");
+    const headingTitleKey = normalizeTitle(text(rawInput?.headingTitle));
+    if (headingTitleKey && maps.ambiguousHeadingTitles.has(headingTitleKey)) reasons.push("heading_title_ambiguous");
+  }
+
+  return Array.from(new Set(reasons));
+}
+
 function buildVideoMetadataMaps(talksPayload, latestPayload) {
   const byVideoId = new Map();
   const byCanonicalUrl = new Map();
@@ -211,27 +292,15 @@ function ensureVideoMetadataMaps(mapsOrMap) {
   };
 }
 
-function resolveVoteMetadata(vote, mapsOrMap) {
+function resolveVoteMetadata(vote, mapsOrMap, rawInput = vote) {
   const maps = ensureVideoMetadataMaps(mapsOrMap);
-  const normalizedVote = {
-    ...vote,
-    headingId: text(vote?.headingId),
-    videoId: text(vote?.videoId),
-    headingTitle: text(vote?.headingTitle),
-    videoTitle: text(vote?.videoTitle),
-    sourceVideoTitle: text(vote?.sourceVideoTitle),
-    sourceVideoUrl: text(vote?.sourceVideoUrl) || text(vote?.videoUrl),
-    headingStart: text(vote?.headingStart),
-    publishedAt: text(vote?.publishedAt),
-    videoDate: text(vote?.videoDate),
-    sourceMode: text(vote?.sourceMode) || "unknown",
-  };
+  const normalizedVote = normalizeVotePayload(vote);
 
   let resolvedMeta = null;
   const byId = maps.byVideoId.get(normalizedVote.videoId);
   if (byId) resolvedMeta = byId;
 
-  const extractedFromUrl = extractYouTubeVideoId(normalizedVote.sourceVideoUrl);
+  const extractedFromUrl = extractYouTubeVideoId(text(rawInput?.sourceVideoUrl) || text(rawInput?.videoUrl));
   if (!resolvedMeta && extractedFromUrl && maps.byVideoId.get(extractedFromUrl)) {
     resolvedMeta = maps.byVideoId.get(extractedFromUrl);
   }
@@ -251,12 +320,8 @@ function resolveVoteMetadata(vote, mapsOrMap) {
     resolvedMeta = maps.byHeadingId.get(normalizedVote.headingId);
   }
   const meta = resolvedMeta || {};
-  const resolvedVideoId = normalizedVote.videoId || extractedFromUrl || text(meta.videoId);
-  const rawSourceUrl = text(normalizedVote.sourceVideoUrl);
-  const resolvedUrl = canonicalizeYouTubeUrl(rawSourceUrl)
-    || rawSourceUrl
-    || canonicalizeYouTubeUrl(resolvedVideoId)
-    || text(meta.url);
+  const resolvedVideoId = normalizedVote.videoId || (isValidYouTubeVideoId(extractedFromUrl) ? extractedFromUrl : "") || text(meta.videoId);
+  const resolvedUrl = canonicalizeYouTubeUrl(resolvedVideoId) || text(meta.url);
   const resolvedPublishedAt = normalizedVote.publishedAt || normalizedVote.videoDate || text(meta.publishedAt) || text(meta.videoDate);
   const resolvedVideoDate = normalizedVote.videoDate || normalizedVote.publishedAt || text(meta.videoDate) || text(meta.publishedAt);
   const resolvedVideoTitle = normalizedVote.videoTitle || text(meta.title);
@@ -273,23 +338,7 @@ function resolveVoteMetadata(vote, mapsOrMap) {
     videoDate: resolvedVideoDate,
   };
 
-  const reasons = [];
-  if (!text(result.videoId)) reasons.push("missing_video_id");
-  if (!(text(result.publishedAt) || text(result.videoDate))) reasons.push("missing_published_at");
-  if (!(text(result.sourceVideoTitle) || text(result.videoTitle))) reasons.push("missing_video_title");
-  if (!text(result.sourceVideoUrl)) reasons.push("missing_source_video_url");
-
-  const sourceTitleKey = normalizeTitle(normalizedVote.sourceVideoTitle);
-  const videoTitleKey = normalizeTitle(normalizedVote.videoTitle);
-  if (sourceTitleKey && maps.ambiguousTitles.has(sourceTitleKey)) reasons.push("title_ambiguous");
-  if (videoTitleKey && maps.ambiguousTitles.has(videoTitleKey)) reasons.push("title_ambiguous");
-  const headingTitleKey = normalizeTitle(normalizedVote.headingTitle);
-  if (headingTitleKey && maps.ambiguousHeadingTitles.has(headingTitleKey)) reasons.push("heading_title_ambiguous");
-  if (text(normalizedVote.sourceVideoUrl) && !extractYouTubeVideoId(normalizedVote.sourceVideoUrl) && !text(result.sourceVideoUrl)) {
-    reasons.push("url_unparseable");
-  }
-
-  const uniqueReasons = Array.from(new Set(reasons));
+  const uniqueReasons = collectMetadataValidationReasons(result, rawInput, maps);
   const hasMinimum = uniqueReasons.length === 0;
   result.metadataIncomplete = !hasMinimum;
   result.metadataIncompleteReason = uniqueReasons;
@@ -491,13 +540,8 @@ function canonicalVoteMetadata(receivedAtIso, payloadTimestamp) {
   return metadata;
 }
 
-function hasCompleteMetadata(payload) {
-  return !!(
-    text(payload?.videoId)
-    && (text(payload?.publishedAt) || text(payload?.videoDate))
-    && (text(payload?.sourceVideoTitle) || text(payload?.videoTitle))
-    && text(payload?.sourceVideoUrl)
-  );
+function hasCompleteMetadata(payload, rawInput = payload) {
+  return collectMetadataValidationReasons(payload, rawInput).length === 0;
 }
 
 async function hmacSha256Hex(secret, message) {
@@ -609,17 +653,22 @@ async function writeVote(request, env) {
     publishedAt: text(payload?.publishedAt),
     videoDate: text(payload?.videoDate),
   };
+  const normalizedPayload = normalizeVotePayload(rawPayload);
 
   let resolvedPayload = {
-    ...rawPayload,
+    ...normalizedPayload,
     metadataIncomplete: false,
     metadataIncompleteReason: [],
   };
-  if (!hasCompleteMetadata(rawPayload)) {
+  if (!hasCompleteMetadata(normalizedPayload, rawPayload)) {
     const talksPayload = await readJsonObject(env.FAVORITES_BUCKET, "index/talks.json");
     const latestPayload = await readJsonObject(env.FAVORITES_BUCKET, "index/latest.json");
     const metadataMaps = buildVideoMetadataMaps(talksPayload || {}, latestPayload || {});
-    resolvedPayload = resolveVoteMetadata(rawPayload, metadataMaps);
+    resolvedPayload = resolveVoteMetadata(normalizedPayload, metadataMaps, rawPayload);
+  } else {
+    const reasons = collectMetadataValidationReasons(normalizedPayload, rawPayload);
+    resolvedPayload.metadataIncomplete = reasons.length > 0;
+    resolvedPayload.metadataIncompleteReason = reasons;
   }
 
   const body = {
