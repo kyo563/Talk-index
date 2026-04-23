@@ -7,11 +7,11 @@ import gspread
 
 from crawler.services.spreadsheet import _get_or_create_sheet, extract_video_id_from_url
 
-FAVORITES_CURRENT_RANKING_SHEET = "favorites_current_ranking"
-FAVORITES_HALL_OF_FAME_SHEET = "favorites_hall_of_fame"
-FAVORITES_RECENT_RECOMMENDATIONS_SHEET = "favorites_recent_recommendations"
-FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET = "favorites_recent_upload_recommendations"
-FAVORITES_DAILY_SNAPSHOTS_SHEET = "favorites_daily_snapshots"
+FAVORITES_CURRENT_RANKING_SHEET = "お気に入り集計（全期間）"
+FAVORITES_HALL_OF_FAME_SHEET = "殿堂入りトーク（内部）"
+FAVORITES_RECENT_RECOMMENDATIONS_SHEET = "10日間のおすすめトーク（内部）"
+FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET = "直近の動画のおすすめ（内部）"
+FAVORITES_DAILY_SNAPSHOTS_SHEET = "日次スナップショット（内部）"
 PUBLIC_FAVORITES_HALL_OF_FAME_SHEET = "殿堂入りトーク"
 PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET = "10日間のおすすめトーク"
 PUBLIC_FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET = "直近の動画のおすすめ"
@@ -19,20 +19,20 @@ PUBLIC_FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET = "直近の動画のおす
 PUBLIC_FAVORITES_SHEET_HEADERS = ["動画投稿日", "動画タイトル", "大見出し", "得票数"]
 
 FAVORITES_SHEET_HEADERS = [
-    "snapshotDate",
-    "weekKey",
-    "headingId",
-    "headingText",
-    "videoId",
-    "sourceVideoTitle",
-    "voteCount",
-    "rank",
-    "firstVotedAt",
-    "lastVotedAt",
-    "aggregateType",
-    "generatedAt",
-    "sourceJsonUrl",
-    "note",
+    "集計日",
+    "週キー",
+    "大見出しID",
+    "大見出し",
+    "動画ID",
+    "動画タイトル",
+    "得票数",
+    "順位",
+    "初回得票日時",
+    "最終得票日時",
+    "集計種別",
+    "集計時刻",
+    "参照JSON",
+    "メモ",
 ]
 
 HeadingVideoTitleMap = dict[str, dict[Any, Any]]
@@ -283,7 +283,6 @@ def build_public_sheet_rows_from_items(
         row = [video_date, title_cell, heading_text, str(vote_count)]
         enriched_rows.append((vote_count, video_date, video_title, row))
 
-    enriched_rows.sort(key=lambda entry: (-entry[0], -_date_sort_key(entry[1]), entry[2].lower()))
     return [entry[3] for entry in enriched_rows]
 
 

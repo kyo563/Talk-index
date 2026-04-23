@@ -148,11 +148,38 @@ def build_video_metadata_map(talks_payload: dict[str, Any], latest_payload: dict
     return out
 
 
+def _published_at_sort_key(item: dict[str, Any]) -> str:
+    return to_text(item.get("publishedAt")) or "9999-12-31T23:59:59Z"
+
+
+def _heading_stable_key(item: dict[str, Any]) -> tuple[str, str]:
+    return (to_text(item.get("videoId")), to_text(item.get("headingId")))
+
+
 def stable_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     return (
         -int(item.get("voteCount", 0)),
-        to_text(item.get("firstVotedAt")),
-        to_text(item.get("headingId")),
+        _published_at_sort_key(item),
+        *_heading_stable_key(item),
+    )
+
+
+def recent_recommendations_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    last_voted = parse_iso_datetime_optional(to_text(item.get("lastVotedAt")))
+    last_voted_key = -last_voted.timestamp() if last_voted else float("inf")
+    return (
+        -int(item.get("voteCount", 0)),
+        last_voted_key,
+        _published_at_sort_key(item),
+        *_heading_stable_key(item),
+    )
+
+
+def recent_upload_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        -int(item.get("voteCount", 0)),
+        _published_at_sort_key(item),
+        *_heading_stable_key(item),
     )
 
 
@@ -218,16 +245,11 @@ def build_aggregates(
         if vote.first_voted_at > to_text(w_item.get("lastVotedAt")):
             w_item["lastVotedAt"] = vote.first_voted_at
 
-    all_ranking = sorted(ranking.values(), key=stable_sort_key)
     now_base = now_utc or datetime.now(UTC)
     jst_now = now_base + JST_OFFSET
-    current_week_key = (jst_now - timedelta(days=jst_now.weekday())).strftime("%Y-%m-%d")
-    previous_week_key = (datetime.fromisoformat(current_week_key) - timedelta(days=7)).strftime("%Y-%m-%d")
-
-    weekly_items = sorted(weekly_counts.get(previous_week_key, {}).values(), key=stable_sort_key)
 
     metadata_map = video_metadata_map or {}
-    for item in all_ranking:
+    for item in ranking.values():
         video_id = to_text(item.get("videoId"))
         if not video_id:
             continue
@@ -238,9 +260,43 @@ def build_aggregates(
             item["sourceVideoUrl"] = to_text(meta.get("url"))
         if not to_text(item.get("publishedAt")) and to_text(meta.get("published_at")):
             item["publishedAt"] = to_text(meta.get("published_at"))
+    all_ranking = sorted(ranking.values(), key=stable_sort_key)
 
-    recent_upload_window_start = now_base - timedelta(days=7)
-    recent_upload_items: list[tuple[dict[str, Any], float]] = []
+    recent_recommendation_window_start = now_base - timedelta(hours=240)
+    recent_recommendations: dict[str, dict[str, Any]] = {}
+    for raw in votes:
+        vote = normalize_vote_record(raw)
+        if vote is None:
+            continue
+        voted_at = parse_iso_datetime_optional(vote.first_voted_at)
+        if voted_at is None:
+            continue
+        if not (recent_recommendation_window_start <= voted_at <= now_base):
+            continue
+        if vote.heading_id not in recent_recommendations:
+            recent_recommendations[vote.heading_id] = {
+                "headingId": vote.heading_id,
+                "videoId": vote.video_id,
+                "headingTitle": vote.heading_title,
+                "videoTitle": vote.video_title,
+                "headingStart": vote.heading_start,
+                "sourceMode": vote.source_mode,
+                "voteCount": 0,
+                "firstVotedAt": vote.first_voted_at,
+                "lastVotedAt": vote.first_voted_at,
+                "sourceVideoTitle": vote.video_title,
+                "sourceVideoUrl": vote.source_video_url,
+                "publishedAt": vote.published_at,
+            }
+        recent_item = recent_recommendations[vote.heading_id]
+        recent_item["voteCount"] += 1
+        if vote.first_voted_at and vote.first_voted_at < to_text(recent_item.get("firstVotedAt")):
+            recent_item["firstVotedAt"] = vote.first_voted_at
+        if vote.first_voted_at and vote.first_voted_at > to_text(recent_item.get("lastVotedAt")):
+            recent_item["lastVotedAt"] = vote.first_voted_at
+
+    recent_upload_window_start = now_base - timedelta(hours=168)
+    recent_upload_items: list[dict[str, Any]] = []
     for item in all_ranking:
         published_at = to_text(item.get("publishedAt"))
         published_dt = parse_iso_datetime_optional(published_at)
@@ -250,15 +306,10 @@ def build_aggregates(
             continue
         if not (recent_upload_window_start <= published_dt <= now_base):
             continue
-        recent_upload_items.append((item, published_dt.timestamp()))
+        recent_upload_items.append(item)
 
-    recent_upload_items.sort(
-        key=lambda entry: (
-            -int(entry[0].get("voteCount", 0)),
-            -entry[1],
-            to_text(entry[0].get("headingId")),
-        )
-    )
+    recent_upload_items.sort(key=recent_upload_sort_key)
+    recent_recommendations_items = sorted(recent_recommendations.values(), key=recent_recommendations_sort_key)
 
     base_payload = {
         "generatedAt": now_base.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -281,16 +332,15 @@ def build_aggregates(
         },
         "hall_of_fame": {
             **base_payload,
-            "items": all_ranking[:3],
+            "items": all_ranking,
         },
         "recent_recommendations": {
             **base_payload,
-            "weekKey": previous_week_key,
-            "items": weekly_items[:5],
+            "items": recent_recommendations_items,
         },
         "recent_upload_recommendations": {
             **base_payload,
-            "items": [entry[0] for entry in recent_upload_items[:5]],
+            "items": recent_upload_items,
         },
         "current_ranking": {
             **base_payload,

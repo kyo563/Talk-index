@@ -10,7 +10,7 @@ import {
   canonicalVoteMetadata,
 } from './worker.mjs';
 
-test('recent_recommendations は generatedAt 基準の直近10日投票で再集計する', () => {
+test('recent_recommendations は generatedAt 基準の直近240時間投票で再集計する', () => {
   const generatedAt = '2026-04-22T12:00:00Z';
   const votes = [
     {
@@ -36,7 +36,7 @@ test('recent_recommendations は generatedAt 基準の直近10日投票で再集
     },
   ];
 
-  const items = buildRecentRecommendations(votes, generatedAt, 10);
+  const items = buildRecentRecommendations(votes, generatedAt, 240);
   assert.equal(items.length, 1);
   assert.equal(items[0].headingId, 'h-old-active');
   assert.equal(items[0].voteCount, 2);
@@ -44,34 +44,34 @@ test('recent_recommendations は generatedAt 基準の直近10日投票で再集
   assert.equal(items[0].lastVotedAt, '2026-04-21T03:00:00Z');
 });
 
-test('recent_recommendations の tie-break は firstVotedAt → headingId', () => {
+test('recent_recommendations の tie-break は lastVotedAt desc → headingId', () => {
   const generatedAt = '2026-04-22T12:00:00Z';
   const votes = [
     { headingId: 'b-id', firstVotedAt: '2026-04-20T01:00:00Z' },
-    { headingId: 'a-id', firstVotedAt: '2026-04-20T01:00:00Z' },
+    { headingId: 'a-id', firstVotedAt: '2026-04-20T02:00:00Z' },
   ];
 
-  const items = buildRecentRecommendations(votes, generatedAt, 10);
+  const items = buildRecentRecommendations(votes, generatedAt, 240);
   assert.deepEqual(items.map((item) => item.headingId), ['a-id', 'b-id']);
 });
 
-test('recent_upload_recommendations は1週間以内の公開動画のみ対象', () => {
+test('recent_upload_recommendations は168時間以内の公開動画のみ対象', () => {
   const generatedAt = '2026-04-22T12:00:00Z';
   const items = buildRecentUploadRecommendations([
     { headingId: 'in', voteCount: 3, publishedAt: '2026-04-18' },
     { headingId: 'out', voteCount: 9, publishedAt: '2026-04-01' },
-  ], generatedAt, 7);
+  ], generatedAt, 168);
   assert.deepEqual(items.map((item) => item.headingId), ['in']);
 });
 
-test('recent_upload_recommendations の tie-break は publishedAt desc → headingId', () => {
+test('recent_upload_recommendations の tie-break は publishedAt asc(古い優先) → headingId', () => {
   const generatedAt = '2026-04-22T12:00:00Z';
   const items = buildRecentUploadRecommendations([
     { headingId: 'b-id', voteCount: 2, publishedAt: '2026-04-20' },
     { headingId: 'a-id', voteCount: 2, publishedAt: '2026-04-20' },
     { headingId: 'newer', voteCount: 2, publishedAt: '2026-04-21' },
-  ], generatedAt, 7);
-  assert.deepEqual(items.map((item) => item.headingId), ['newer', 'a-id', 'b-id']);
+  ], generatedAt, 168);
+  assert.deepEqual(items.map((item) => item.headingId), ['a-id', 'b-id', 'newer']);
 });
 
 test('daily snapshot の JST 日付', () => {

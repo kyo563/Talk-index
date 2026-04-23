@@ -66,19 +66,30 @@ class FavoritesTests(unittest.TestCase):
         ]
 
         aggregates = build_aggregates(votes, now_utc=datetime(2026, 4, 21, tzinfo=UTC))
-        previous_week = aggregates["recent_recommendations"]
+        recent = aggregates["recent_recommendations"]
         weekly_0413 = aggregates["weekly"]["2026-04-13"]["items"][0]
         weekly_0420 = aggregates["weekly"]["2026-04-20"]["items"][0]
 
         self.assertEqual(aggregates["hall_of_fame"]["items"][0]["headingId"], "h1")
         self.assertEqual(aggregates["hall_of_fame"]["items"][0]["voteCount"], 4)
-        self.assertEqual(previous_week["weekKey"], "2026-04-13")
-        self.assertEqual(len(previous_week["items"]), 1)
+        self.assertEqual(len(aggregates["hall_of_fame"]["items"]), 2)
+        self.assertEqual(len(recent["items"]), 2)
         self.assertEqual(aggregates["daily_snapshot"]["snapshotDate"], "2026-04-21")
         self.assertEqual(weekly_0413["firstVotedAt"], "2026-04-14T04:00:00Z")
         self.assertEqual(weekly_0413["lastVotedAt"], "2026-04-19T04:00:00Z")
         self.assertEqual(weekly_0420["firstVotedAt"], "2026-04-20T01:00:00Z")
         self.assertEqual(weekly_0420["lastVotedAt"], "2026-04-20T02:00:00Z")
+
+    def test_recent_recommendations_counts_only_240h_votes(self):
+        votes = [
+            {"headingId": "h1", "clientHash": "c1", "videoId": "v1", "firstVotedAt": "2026-04-12T12:00:00Z"},
+            {"headingId": "h1", "clientHash": "c2", "videoId": "v1", "firstVotedAt": "2026-04-12T11:59:59Z"},
+            {"headingId": "h2", "clientHash": "c3", "videoId": "v2", "firstVotedAt": "2026-04-21T12:00:00Z"},
+        ]
+        aggregates = build_aggregates(votes, now_utc=datetime(2026, 4, 22, 12, 0, tzinfo=UTC))
+        items = aggregates["recent_recommendations"]["items"]
+        self.assertEqual([item["headingId"] for item in items], ["h2", "h1"])
+        self.assertEqual(items[0]["voteCount"], 1)
 
     def test_recent_upload_recommendations_uses_video_publish_date_window(self):
         votes = [
@@ -127,6 +138,21 @@ class FavoritesTests(unittest.TestCase):
         self.assertEqual([item["headingId"] for item in recent_upload], ["h1", "h3"])
         self.assertEqual(recent_upload[0]["voteCount"], 2)
         self.assertEqual(recent_upload[0]["publishedAt"], "2026-04-21")
+
+    def test_tie_break_prefers_older_video_then_ids(self):
+        votes = [
+            {"headingId": "h2", "clientHash": "c1", "videoId": "v2", "firstVotedAt": "2026-04-20T00:00:00Z"},
+            {"headingId": "h1", "clientHash": "c2", "videoId": "v1", "firstVotedAt": "2026-04-20T01:00:00Z"},
+        ]
+        metadata = {
+            "v1": {"published_at": "2026-04-21"},
+            "v2": {"published_at": "2026-04-20"},
+        }
+        aggregates = build_aggregates(votes, now_utc=datetime(2026, 4, 22, tzinfo=UTC), video_metadata_map=metadata)
+        hall_items = aggregates["hall_of_fame"]["items"]
+        recent_upload_items = aggregates["recent_upload_recommendations"]["items"]
+        self.assertEqual([item["headingId"] for item in hall_items], ["h2", "h1"])
+        self.assertEqual([item["headingId"] for item in recent_upload_items], ["h2", "h1"])
 
     def test_build_video_metadata_map(self):
         talks = {

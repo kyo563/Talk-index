@@ -161,8 +161,9 @@ npm run ci:build
 - 集計正本の時刻（`firstVotedAt`, `weekKey`, `daily_snapshot`）は **サーバ受信時刻** を使います
 - `payload.timestamp` は集計に使わず、必要時のみ `clientTimestamp` として保持します
 - hash 方式は Python / Worker 共通で `HMAC-SHA256(secret, "${scope}:${value}")` です
-- `recent_recommendations` は **generatedAt基準の直近10日間** の投票イベントを再集計して参照します
-- `recent_upload_recommendations` は **generatedAt基準の過去7日以内に公開された動画**に属する大見出しを、累計票で上位化します
+- `hall_of_fame` は **全期間・全動画・全トークテーマ** を累計票で集計します（R2は全件保持）
+- `recent_recommendations` は **generatedAt基準の直近240時間（10日）** の投票イベントだけを再集計します（票が1以上の項目を全件保持）
+- `recent_upload_recommendations` は **generatedAt基準の直近168時間（7日）以内に公開された動画群**を対象に、対象動画内トークの累計票で集計します（R2は全件保持）
 
 ### favorites の実装位置
 
@@ -179,7 +180,6 @@ npm run ci:build
 
 - `sendFavoriteVote(baseUrl, payload)`
 - `fetchHallOfFame(baseUrl)`
-- `fetchRecentRecommendations(baseUrl)`
 - `fetchRecentUploadRecommendations(baseUrl)`
 - `fetchFavoriteRanking(baseUrl)`
 
@@ -202,8 +202,9 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
   - 既にサーバ成功済みの heading は再送しない
 - お気に入りタブの3カード:
   - お気に入りリスト（localStorage基準）
-  - 直近の動画のおすすめ（`/favorites/recent_upload_recommendations.json`、上位3件）
-  - 殿堂入り（`/favorites/hall_of_fame.json`、上位3件）
+  - 直近の動画のおすすめ（`/favorites/recent_upload_recommendations.json`、上位5件）
+  - 殿堂入り（`/favorites/hall_of_fame.json`、上位5件）
+  - `recent_recommendations` は HTML に表示しません（スプレッドシート用）
 
 
 ### favorites ミラー同期（R2 → Spreadsheet）
@@ -220,11 +221,11 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
 
 #### 反映先シート
 
-- `favorites_current_ranking`（毎回全置換）
-- `favorites_hall_of_fame`（毎回全置換、上位3件）
-- `favorites_recent_recommendations`（毎回全置換、generatedAt基準の直近10日間上位5件）
-- `favorites_recent_upload_recommendations`（毎回全置換、generatedAt基準の過去7日以内公開動画を累計票で上位5件）
-- `favorites_daily_snapshots`（`snapshotDate + headingId` をキーに upsert / 履歴保持）
+- `お気に入り集計（全期間）`（毎回全置換）
+- `殿堂入りトーク（内部）`（毎回全置換、全件）
+- `10日間のおすすめトーク（内部）`（毎回全置換、generatedAt基準の直近240時間の票を全件）
+- `直近の動画のおすすめ（内部）`（毎回全置換、generatedAt基準の過去168時間以内公開動画を累計票で全件）
+- `日次スナップショット（内部）`（`snapshotDate + headingId` をキーに upsert / 履歴保持）
 - 公開用別スプレッドシート（`PUBLIC_FAVORITES_SPREADSHEET_ID`）:
   - `殿堂入りトーク`（毎回全置換）
   - `10日間のおすすめトーク`（毎回全置換）
@@ -232,8 +233,7 @@ JSON取得の共通基盤は `src/data/fetch-json.js`（`fetchJsonFromCandidates
 
 #### 列
 
-- 必須: `snapshotDate`, `weekKey`, `headingId`, `headingText`, `videoId`, `sourceVideoTitle`, `voteCount`, `rank`, `firstVotedAt`, `lastVotedAt`, `aggregateType`
-- 追加: `generatedAt`, `sourceJsonUrl`, `note`
+- 非公開用シート列（日本語固定）: `集計日`, `週キー`, `大見出しID`, `大見出し`, `動画ID`, `動画タイトル`, `得票数`, `順位`, `初回得票日時`, `最終得票日時`, `集計種別`, `集計時刻`, `参照JSON`, `メモ`
 - 公開用シート列（日本語固定）: `動画投稿日`, `動画タイトル`（リンク付き）, `大見出し`, `得票数`
 
 #### 実行方法

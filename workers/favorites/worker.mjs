@@ -38,10 +38,15 @@ function previousCompletedWeekKeyFromIso(iso) {
 }
 
 
-function buildRecentRecommendations(votes, generatedAtIso, windowDays = 10) {
+function parseEventMs(value) {
+  const ms = Date.parse(text(value));
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function buildRecentRecommendations(votes, generatedAtIso, windowHours = 240) {
   const generatedAtMs = Date.parse(text(generatedAtIso));
   if (!Number.isFinite(generatedAtMs)) return [];
-  const windowStartMs = generatedAtMs - windowDays * 24 * 60 * 60 * 1000;
+  const windowStartMs = generatedAtMs - windowHours * 60 * 60 * 1000;
 
   const recentMap = new Map();
   for (const vote of votes) {
@@ -75,8 +80,15 @@ function buildRecentRecommendations(votes, generatedAtIso, windowDays = 10) {
 
   return Array.from(recentMap.values()).sort((a, b) => {
     if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
-    if (a.firstVotedAt !== b.firstVotedAt) return a.firstVotedAt.localeCompare(b.firstVotedAt);
-    return a.headingId.localeCompare(b.headingId);
+    const aLast = parseEventMs(a.lastVotedAt) ?? -Infinity;
+    const bLast = parseEventMs(b.lastVotedAt) ?? -Infinity;
+    if (bLast !== aLast) return bLast - aLast;
+    const aPublished = parsePublishedAt(text(a.publishedAt) || text(a.videoDate)) ?? Number.MAX_SAFE_INTEGER;
+    const bPublished = parsePublishedAt(text(b.publishedAt) || text(b.videoDate)) ?? Number.MAX_SAFE_INTEGER;
+    if (aPublished !== bPublished) return aPublished - bPublished;
+    const videoCmp = text(a.videoId).localeCompare(text(b.videoId));
+    if (videoCmp !== 0) return videoCmp;
+    return text(a.headingId).localeCompare(text(b.headingId));
   });
 }
 
@@ -89,10 +101,10 @@ function parsePublishedAt(value) {
   return ms;
 }
 
-function buildRecentUploadRecommendations(rankingItems, generatedAtIso, windowDays = 7) {
+function buildRecentUploadRecommendations(rankingItems, generatedAtIso, windowHours = 168) {
   const generatedAtMs = Date.parse(text(generatedAtIso));
   if (!Number.isFinite(generatedAtMs)) return [];
-  const windowStartMs = generatedAtMs - windowDays * 24 * 60 * 60 * 1000;
+  const windowStartMs = generatedAtMs - windowHours * 60 * 60 * 1000;
   const items = (Array.isArray(rankingItems) ? rankingItems : [])
     .map((item) => {
       const publishedAt = text(item?.publishedAt) || text(item?.videoDate);
@@ -105,7 +117,9 @@ function buildRecentUploadRecommendations(rankingItems, generatedAtIso, windowDa
 
   items.sort((a, b) => {
     if (Number(b.voteCount || 0) !== Number(a.voteCount || 0)) return Number(b.voteCount || 0) - Number(a.voteCount || 0);
-    if (b.publishedAtMs !== a.publishedAtMs) return b.publishedAtMs - a.publishedAtMs;
+    if (a.publishedAtMs !== b.publishedAtMs) return a.publishedAtMs - b.publishedAtMs;
+    const videoCmp = text(a.videoId).localeCompare(text(b.videoId));
+    if (videoCmp !== 0) return videoCmp;
     return text(a.headingId).localeCompare(text(b.headingId));
   });
 
@@ -283,6 +297,7 @@ async function rebuildAggregates(request, env) {
         voteCount: 0,
         firstVotedAt: text(vote.firstVotedAt),
         lastVotedAt: text(vote.firstVotedAt),
+        publishedAt: text(vote.publishedAt),
       });
     }
     const item = ranking.get(headingId);
@@ -304,6 +319,7 @@ async function rebuildAggregates(request, env) {
         voteCount: 0,
         firstVotedAt: text(vote.firstVotedAt),
         lastVotedAt: text(vote.firstVotedAt),
+        publishedAt: text(vote.publishedAt),
       });
     }
     const weekItem = weekMap.get(headingId);
@@ -314,18 +330,22 @@ async function rebuildAggregates(request, env) {
 
   const sorted = Array.from(ranking.values()).sort((a, b) => {
     if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
-    if (a.firstVotedAt !== b.firstVotedAt) return a.firstVotedAt.localeCompare(b.firstVotedAt);
-    return a.headingId.localeCompare(b.headingId);
+    const aPublished = parsePublishedAt(text(a.publishedAt) || text(a.videoDate)) ?? Number.MAX_SAFE_INTEGER;
+    const bPublished = parsePublishedAt(text(b.publishedAt) || text(b.videoDate)) ?? Number.MAX_SAFE_INTEGER;
+    if (aPublished !== bPublished) return aPublished - bPublished;
+    const videoCmp = text(a.videoId).localeCompare(text(b.videoId));
+    if (videoCmp !== 0) return videoCmp;
+    return text(a.headingId).localeCompare(text(b.headingId));
   });
 
   const generatedAt = new Date().toISOString();
-  const recentItems = buildRecentRecommendations(votes, generatedAt, 10);
-  const recentUploadItems = buildRecentUploadRecommendations(sorted, generatedAt, 7);
+  const recentItems = buildRecentRecommendations(votes, generatedAt, 240);
+  const recentUploadItems = buildRecentUploadRecommendations(sorted, generatedAt, 168);
 
   const allTime = { generatedAt, source: "favorites/unique", items: sorted };
-  const hall = { generatedAt, source: "favorites/unique", items: sorted.slice(0, 3) };
-  const recent = { generatedAt, source: "favorites/unique", items: recentItems.slice(0, 5) };
-  const recentUpload = { generatedAt, source: "favorites/unique", items: recentUploadItems.slice(0, 5) };
+  const hall = { generatedAt, source: "favorites/unique", items: sorted };
+  const recent = { generatedAt, source: "favorites/unique", items: recentItems };
+  const recentUpload = { generatedAt, source: "favorites/unique", items: recentUploadItems };
   const currentRanking = { generatedAt, source: "favorites/unique", items: sorted };
   const snapshotDate = jstDateFromIso(generatedAt);
   const dailySnapshot = { generatedAt, source: "favorites/unique", snapshotDate, items: sorted };
@@ -342,8 +362,12 @@ async function rebuildAggregates(request, env) {
   for (const [weekKey, map] of weekly.entries()) {
     const items = Array.from(map.values()).sort((a, b) => {
       if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
-      if (a.firstVotedAt !== b.firstVotedAt) return a.firstVotedAt.localeCompare(b.firstVotedAt);
-      return a.headingId.localeCompare(b.headingId);
+      const aPublished = parsePublishedAt(text(a.publishedAt) || text(a.videoDate)) ?? Number.MAX_SAFE_INTEGER;
+      const bPublished = parsePublishedAt(text(b.publishedAt) || text(b.videoDate)) ?? Number.MAX_SAFE_INTEGER;
+      if (aPublished !== bPublished) return aPublished - bPublished;
+      const videoCmp = text(a.videoId).localeCompare(text(b.videoId));
+      if (videoCmp !== 0) return videoCmp;
+      return text(a.headingId).localeCompare(text(b.headingId));
     });
     await env.FAVORITES_BUCKET.put(
       `favorites/aggregates/weekly/${weekKey}.json`,

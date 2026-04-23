@@ -2,6 +2,10 @@ import unittest
 from datetime import UTC, datetime
 
 from crawler.services.favorites_mirror import (
+    FAVORITES_DAILY_SNAPSHOTS_SHEET,
+    FAVORITES_HALL_OF_FAME_SHEET,
+    FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
+    FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET,
     FAVORITES_SHEET_HEADERS,
     PUBLIC_FAVORITES_SHEET_HEADERS,
     PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET,
@@ -80,6 +84,13 @@ class FavoritesMirrorTests(unittest.TestCase):
     def test_public_headers_are_japanese(self):
         self.assertEqual(PUBLIC_FAVORITES_SHEET_HEADERS, ["動画投稿日", "動画タイトル", "大見出し", "得票数"])
 
+    def test_private_sheet_names_and_headers_are_japanese(self):
+        self.assertEqual(FAVORITES_HALL_OF_FAME_SHEET, "殿堂入りトーク（内部）")
+        self.assertEqual(FAVORITES_RECENT_RECOMMENDATIONS_SHEET, "10日間のおすすめトーク（内部）")
+        self.assertEqual(FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET, "直近の動画のおすすめ（内部）")
+        self.assertEqual(FAVORITES_SHEET_HEADERS[0], "集計日")
+        self.assertEqual(FAVORITES_SHEET_HEADERS[9], "最終得票日時")
+
     def test_public_sheet_names_include_recent_upload(self):
         self.assertEqual(PUBLIC_FAVORITES_RECENT_RECOMMENDATIONS_SHEET, "10日間のおすすめトーク")
         self.assertEqual(PUBLIC_FAVORITES_RECENT_UPLOAD_RECOMMENDATIONS_SHEET, "直近の動画のおすすめ")
@@ -130,9 +141,9 @@ class FavoritesMirrorTests(unittest.TestCase):
         }
         rows = build_public_sheet_rows_from_items(payload=payload, video_metadata_map=meta)
         self.assertEqual(len(rows[0]), 4)
-        self.assertEqual(rows[0][0], "2026-04-21")
-        self.assertTrue(rows[0][1].startswith('=HYPERLINK("https://www.youtube.com/watch?v=AAAAAAAAAAA"'))
-        self.assertIn('動画""2', rows[1][1])
+        self.assertEqual(rows[0][0], "2026-04-20")
+        self.assertTrue(rows[0][1].startswith('=HYPERLINK("https://www.youtube.com/watch?v=BBBBBBBBBBB"'))
+        self.assertIn('動画""2', rows[0][1])
 
     def test_public_rows_fallback_by_heading_id_when_video_id_missing(self):
         talks_payload = {
@@ -303,7 +314,7 @@ class FavoritesMirrorTests(unittest.TestCase):
         updated, appended = upsert_daily_snapshot_rows(
             client=client,
             spreadsheet_id="dummy",
-            worksheet_name="favorites_daily_snapshots",
+            worksheet_name=FAVORITES_DAILY_SNAPSHOTS_SHEET,
             rows=rows,
         )
 
@@ -319,7 +330,7 @@ class FavoritesMirrorTests(unittest.TestCase):
         upsert_daily_snapshot_rows(
             client=client,
             spreadsheet_id="dummy",
-            worksheet_name="favorites_daily_snapshots",
+            worksheet_name=FAVORITES_DAILY_SNAPSHOTS_SHEET,
             rows=rows,
         )
 
