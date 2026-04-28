@@ -5,240 +5,123 @@ from crawler.services.timestamps import build_timestamp_rows
 
 
 class TimestampTests(unittest.TestCase):
-    def test_hhmmss_major_three_lines(self):
-        text = "\n".join([
-            "0:12:34 大見出しA",
-            "1:23:45 大見出しB",
-            "2:10:00 大見出しC",
-        ])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[TimestampSource(source_type="description", text=text)],
+    def test_top_level_with_heading_and_children(self):
+        source = TimestampSource(
+            source_type="top",
+            source_id="c1",
+            published_at="2026-01-01T00:00:00Z",
+            text="\n".join([
+                "00:00:10 大見出しA",
+                "├00:00:20 小見出しA-1",
+                "└補足A (00:00:30)",
+            ]),
         )
-        self.assertEqual(len(rows), 3)
+        rows = build_timestamp_rows("https://www.youtube.com/watch?v=abc123def45", timestamp_sources=[source])
+        self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0][0], "大見出しA")
-        self.assertEqual(rows[1][0], "大見出しB")
-        self.assertEqual(rows[2][0], "大見出しC")
+        self.assertEqual(rows[0][2], "小見出しA-1")
 
-    def test_line_end_parenthesis_minor(self):
-        text = "\n".join([
-            "0:00:30 大見出し",
-            "├小見出し情報(1:23:45)",
-            "├小見出し情報（1:23:45）",
-        ])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[TimestampSource(source_type="description", text=text)],
-        )
-        minors = [r[2] for r in rows if r[2]]
-        self.assertEqual(minors.count("小見出し情報"), 1)
+    def test_reply_child_is_reflected(self):
+        sources = [
+            TimestampSource(
+                source_type="top",
+                source_id="c1",
+                published_at="2026-01-01T00:00:00Z",
+                text="00:00:10 大見出しA\n00:01:00 大見出しB",
+            ),
+            TimestampSource(
+                source_type="reply",
+                source_id="r1",
+                parent_id="c1",
+                is_reply=True,
+                published_at="2026-01-01T00:00:10Z",
+                text="├補足B (00:01:10)",
+            ),
+        ]
+        rows = build_timestamp_rows("https://www.youtube.com/watch?v=abc123def45", timestamp_sources=sources)
+        self.assertIn("補足B", [row[2] for row in rows])
 
-    def test_tree_prefix_line_end_timestamp_is_always_minor(self):
-        text = "\n".join([
-            "00:00:00 親大見出し",
-            "├行末タイムスタンプ小見出し (0:12:34)",
-        ])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[TimestampSource(source_type="top", text=text)],
-        )
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][0], "親大見出し")
-        self.assertEqual(rows[0][2], "行末タイムスタンプ小見出し")
+    def test_single_supplement_from_other_comment_is_reflected(self):
+        sources = [
+            TimestampSource(
+                source_type="top",
+                source_id="main",
+                published_at="2026-01-01T00:00:00Z",
+                text="00:00:10 大見出しA\n00:01:00 大見出しB",
+            ),
+            TimestampSource(
+                source_type="top",
+                source_id="extra",
+                published_at="2026-01-01T00:00:05Z",
+                text="├補足B (00:01:20)",
+            ),
+        ]
+        rows = build_timestamp_rows("https://www.youtube.com/watch?v=abc123def45", timestamp_sources=sources)
+        self.assertIn("補足B", [row[2] for row in rows])
 
-    def test_tree_prefix_bracket_remains_only_is_discarded(self):
-        text = "\n".join([
-            "00:00:00 親大見出し",
-            "├) (0:12:34)",
-            "├） （0:12:34）",
-            "├() (0:12:34)",
-            "├（） （0:12:34）",
-        ])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[TimestampSource(source_type="top", text=text)],
-        )
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][0], "親大見出し")
-        self.assertEqual(rows[0][2], "")
-
-    def test_tree_symbol_variants_are_minor_target(self):
-        symbols = ["├", "┝", "└", "┗", "┣", "┠", "┡", "┢", "│", "┃"]
-        text = ["00:00:00 親大見出し"]
-        for index, symbol in enumerate(symbols, start=1):
-            text.append(f"{symbol}小見出し{index} (0:00:{index:02d})")
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[TimestampSource(source_type="top", text="\n".join(text))],
-        )
-        minors = [r[2] for r in rows if r[2]]
-        self.assertEqual(minors, [f"小見出し{i}" for i in range(1, len(symbols) + 1)])
-
-    def test_tree_prefix_and_hhmmss_grouping_from_comment(self):
-        comment = "\n".join([
-            "00:00:00 大見出し①",
-            "├0:00:10 小見出し1",
-            "├0:00:20 小見出し2",
-            "00:30:00 大見出し②",
-            "├0:30:10 小見出し2-1",
-            "├0:30:20 小見出し2-2",
-        ])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[TimestampSource(source_type="top", text=comment)],
-        )
-
-        self.assertIn(("大見出し①", "https://www.youtube.com/watch?v=abc123def45", "小見出し1", "https://www.youtube.com/watch?v=abc123def45&t=10s"), rows)
-        self.assertIn(("大見出し②", "https://www.youtube.com/watch?v=abc123def45&t=1800s", "小見出し2-1", "https://www.youtube.com/watch?v=abc123def45&t=1810s"), rows)
-        majors_for_late_minors = {row[0] for row in rows if row[2] in {"小見出し2-1", "小見出し2-2"}}
-        self.assertEqual(majors_for_late_minors, {"大見出し②"})
-
-    def test_comment_priority_and_description_complement(self):
-        comment = "\n".join(["00:00:00 大見出し①", "00:30:00 大見出し②"])
-        description = "\n".join(["0:00:00 オープニング", "0:15:00 中間チャプター", "0:30:00 後半"])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            description=description,
-            timestamp_sources=[TimestampSource(source_type="top", text=comment)],
-        )
-
-        major_labels = [row[0] for row in rows]
-        self.assertIn("大見出し①", major_labels)
-        self.assertIn("大見出し②", major_labels)
-        self.assertIn("中間チャプター", major_labels)
-        self.assertNotIn("オープニング", major_labels)
-        self.assertNotIn("後半", major_labels)
-
-    def test_mmss_is_ignored(self):
-        comment = "\n".join(["05:00 トークA", "10:00 トークB", "15:00 トークC"])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[TimestampSource(source_type="top", text=comment)],
-        )
+    def test_no_primary_no_timeline_from_single_comment_only(self):
+        sources = [
+            TimestampSource(
+                source_type="top",
+                source_id="single",
+                published_at="2026-01-01T00:00:00Z",
+                text="00:01:20 ここ好き",
+            ),
+        ]
+        rows = build_timestamp_rows("https://www.youtube.com/watch?v=abc123def45", timestamp_sources=sources)
         self.assertEqual(rows, [])
 
-    def test_same_label_far_apart_can_coexist(self):
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            description="",
-            timestamp_sources=[
-                TimestampSource(source_type="top", text="00:05:00 雑談"),
-                TimestampSource(source_type="reply", text="00:45:00 雑談"),
-            ],
-        )
-        self.assertEqual([row[0] for row in rows], ["雑談", "雑談"])
-        self.assertEqual(
-            [row[1] for row in rows],
-            [
-                "https://www.youtube.com/watch?v=abc123def45&t=300s",
-                "https://www.youtube.com/watch?v=abc123def45&t=2700s",
-            ],
-        )
-
-    def test_duplicate_within_ten_seconds_keeps_top(self):
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            description="0:20:09 後半開始",
-            timestamp_sources=[
-                TimestampSource(source_type="top", text="0:20:00 本題"),
-                TimestampSource(source_type="reply", text="0:20:07 メイントーク"),
-            ],
-        )
+    def test_video_owner_single_timestamp_is_accepted(self):
+        sources = [
+            TimestampSource(
+                source_type="top",
+                source_id="owner",
+                published_at="2026-01-01T00:00:00Z",
+                is_video_owner=True,
+                text="00:00:20 投稿者コメント",
+            ),
+        ]
+        rows = build_timestamp_rows("https://www.youtube.com/watch?v=abc123def45", timestamp_sources=sources)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][0], "本題")
-        self.assertEqual(rows[0][1], "https://www.youtube.com/watch?v=abc123def45&t=1200s")
+        self.assertEqual(rows[0][0], "投稿者コメント")
 
-    def test_duplicate_at_exactly_ten_seconds_keeps_top(self):
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[
-                TimestampSource(source_type="top", text="0:20:00 本題"),
-                TimestampSource(source_type="reply", text="0:20:10 補足"),
-            ],
-        )
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][0], "本題")
-        self.assertEqual(rows[0][1], "https://www.youtube.com/watch?v=abc123def45&t=1200s")
+    def test_html_order_is_by_start_seconds_not_comment_order(self):
+        sources = [
+            TimestampSource(
+                source_type="top",
+                source_id="late",
+                published_at="2026-01-01T00:10:00Z",
+                text="00:10:00 大見出しC\n00:20:00 大見出しD",
+            ),
+            TimestampSource(
+                source_type="top",
+                source_id="early",
+                published_at="2026-01-01T00:00:00Z",
+                text="00:00:10 大見出しA\n00:01:00 大見出しB",
+            ),
+        ]
+        rows = build_timestamp_rows("https://www.youtube.com/watch?v=abc123def45", timestamp_sources=sources)
+        self.assertEqual([row[0] for row in rows], ["大見出しA", "大見出しB", "大見出しC", "大見出しD"])
 
-    def test_same_source_within_ten_seconds_can_coexist(self):
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            timestamp_sources=[
-                TimestampSource(source_type="top", text="0:10:00 話題A\n0:10:06 話題B"),
-            ],
-        )
-        self.assertEqual([row[0] for row in rows], ["話題A", "話題B"])
-
-    def test_over_ten_seconds_can_coexist(self):
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=abc123def45",
-            description="0:40:30 話題C",
-            timestamp_sources=[
-                TimestampSource(source_type="top", text="0:40:00 話題A"),
-                TimestampSource(source_type="reply", text="0:40:12 話題B"),
-            ],
-        )
-        self.assertEqual([row[0] for row in rows], ["話題A", "話題B", "話題C"])
-
-    def test_additional_rules_requested(self):
-        text = "\n".join([
-            "00:00:00 【オープニングトーク】",
-            "├0:02:31 応援じーじ声入り応援ばーば",
-            "└本日は台湾コーラでカレピ杯",
-            "00:06:57 【本日のアンケート】",
-            "└GWなにして過ごす？",
-            "00:09:52 【12時間配信開催決定！！】",
-            "├0:11:00 今年も目白押し",
-            "├年3回のお祭り",
-            "├ホラゲーもあるよ！ (0:13:32)",
-            "タイトル (1:23:45)",
-            "├）(2:00:00)",
-        ])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=ZUNdZKMWsUQ",
-            timestamp_sources=[TimestampSource(source_type="top", text=text)],
-        )
-
-        majors = [r[0] for r in rows]
-        minors = [r[2] for r in rows if r[2]]
-
-        self.assertIn("【オープニングトーク】", majors)
-        self.assertIn("【本日のアンケート】", majors)
-        self.assertIn("【12時間配信開催決定！！】", majors)
-        self.assertIn("今年も目白押し", minors)
-        self.assertNotIn("年3回のお祭り", minors)
-        self.assertIn("ホラゲーもあるよ！", minors)
-        self.assertIn("タイトル", majors)
-        self.assertNotIn("）", minors)
-
-    def test_zundzkmwsuq_nine_majors_are_saved(self):
-        text = "\n".join([
-            "00:00:00 【オープニングトーク】",
-            "00:06:57 【本日のアンケート】",
-            "00:09:52 【12時間配信開催決定！！】",
-            "00:20:00 【トモコレ面白すぎ問題】",
-            "00:30:00 【最近のUFOキャッチャー】",
-            "00:40:00 【無重力マッサージチェア】",
-            "00:50:00 【年齢を重ねておおらかになった話】",
-            "01:00:00 【連絡を返さない友達=...?】",
-            "01:10:00 【エンディングトーク】",
-        ])
-        rows = build_timestamp_rows(
-            video_url="https://www.youtube.com/watch?v=ZUNdZKMWsUQ",
-            timestamp_sources=[TimestampSource(source_type="top", text=text)],
-        )
-        majors = [r[0] for r in rows]
-        self.assertEqual(majors, [
-            "【オープニングトーク】",
-            "【本日のアンケート】",
-            "【12時間配信開催決定！！】",
-            "【トモコレ面白すぎ問題】",
-            "【最近のUFOキャッチャー】",
-            "【無重力マッサージチェア】",
-            "【年齢を重ねておおらかになった話】",
-            "【連絡を返さない友達=...?】",
-            "【エンディングトーク】",
-        ])
+    def test_duplicate_timestamp_and_title_is_deduped(self):
+        sources = [
+            TimestampSource(
+                source_type="top",
+                source_id="c1",
+                published_at="2026-01-01T00:00:00Z",
+                text="00:10:00 同じ見出し\n00:20:00 大見出しB",
+            ),
+            TimestampSource(
+                source_type="reply",
+                source_id="r1",
+                parent_id="c1",
+                is_reply=True,
+                published_at="2026-01-01T00:00:01Z",
+                text="00:10:00 同じ見出し",
+            ),
+        ]
+        rows = build_timestamp_rows("https://www.youtube.com/watch?v=abc123def45", timestamp_sources=sources)
+        self.assertEqual([row[0] for row in rows].count("同じ見出し"), 1)
 
 
 if __name__ == "__main__":

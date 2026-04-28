@@ -27,14 +27,22 @@ class _CommentThreadsAPI:
 
 
 class _RepliesAPI:
+    def __init__(self, pages_by_parent):
+        self.pages_by_parent = pages_by_parent
+        self.calls = []
+
     def list(self, **kwargs):
-        return _Exec({"items": []})
+        self.calls.append(kwargs)
+        parent = kwargs.get("parentId")
+        token = kwargs.get("pageToken")
+        payload = self.pages_by_parent.get(parent, {}).get(token, {"items": []})
+        return _Exec(payload)
 
 
 class _YoutubeMock:
-    def __init__(self, pages):
+    def __init__(self, pages, reply_pages=None):
         self._threads = _CommentThreadsAPI(pages)
-        self._replies = _RepliesAPI()
+        self._replies = _RepliesAPI(reply_pages or {})
 
     def commentThreads(self):
         return self._threads
@@ -44,7 +52,7 @@ class _YoutubeMock:
 
 
 class YoutubeAndDailyTests(unittest.TestCase):
-    def test_comment_threads_multi_page(self):
+    def test_comment_threads_multi_page_with_order_time(self):
         pages = {
             None: {
                 "items": [
@@ -53,7 +61,11 @@ class YoutubeAndDailyTests(unittest.TestCase):
                         "snippet": {
                             "topLevelComment": {
                                 "id": "c1",
-                                "snippet": {"textOriginal": "00:10 foo", "likeCount": 1},
+                                "snippet": {
+                                    "textOriginal": "00:10:00 foo",
+                                    "likeCount": 1,
+                                    "publishedAt": "2026-01-01T00:00:00Z",
+                                },
                             },
                             "totalReplyCount": 0,
                         },
@@ -68,7 +80,11 @@ class YoutubeAndDailyTests(unittest.TestCase):
                         "snippet": {
                             "topLevelComment": {
                                 "id": "c2",
-                                "snippet": {"textOriginal": "00:20 bar", "likeCount": 1},
+                                "snippet": {
+                                    "textOriginal": "00:20:00 bar",
+                                    "likeCount": 1,
+                                    "publishedAt": "2026-01-01T00:01:00Z",
+                                },
                             },
                             "totalReplyCount": 0,
                         },
@@ -83,6 +99,69 @@ class YoutubeAndDailyTests(unittest.TestCase):
         tops = [s for s in sources if s.source_type == "top"]
         self.assertEqual(len(tops), 2)
         self.assertEqual(len(youtube._threads.calls), 2)
+        self.assertEqual(youtube._threads.calls[0]["order"], "time")
+
+    def test_reply_fetch_has_page_cap(self):
+        pages = {
+            None: {
+                "items": [
+                    {
+                        "id": "t1",
+                        "snippet": {
+                            "topLevelComment": {
+                                "id": "c1",
+                                "snippet": {
+                                    "textOriginal": "00:00:10 top",
+                                    "publishedAt": "2026-01-01T00:00:00Z",
+                                },
+                            },
+                            "totalReplyCount": 5,
+                        },
+                    }
+                ]
+            }
+        }
+        reply_pages = {
+            "c1": {
+                None: {"items": [{"id": "r1", "snippet": {"textOriginal": "00:00:20 r1", "publishedAt": "2026-01-01T00:00:01Z"}}], "nextPageToken": "p2"},
+                "p2": {"items": [{"id": "r2", "snippet": {"textOriginal": "00:00:30 r2", "publishedAt": "2026-01-01T00:00:02Z"}}], "nextPageToken": "p3"},
+                "p3": {"items": [{"id": "r3", "snippet": {"textOriginal": "00:00:40 r3", "publishedAt": "2026-01-01T00:00:03Z"}}], "nextPageToken": "p4"},
+                "p4": {"items": [{"id": "r4", "snippet": {"textOriginal": "00:00:50 r4", "publishedAt": "2026-01-01T00:00:04Z"}}]},
+            }
+        }
+        youtube = _YoutubeMock(pages, reply_pages=reply_pages)
+
+        sources = fetch_timestamp_sources(youtube, "abc123def45", description="")
+        replies = [s for s in sources if s.source_type == "reply"]
+
+        self.assertEqual(len(replies), 3)
+        self.assertEqual(len(youtube._replies.calls), 3)
+
+    def test_pinned_flag_missing_does_not_crash(self):
+        pages = {
+            None: {
+                "items": [
+                    {
+                        "id": "t1",
+                        "snippet": {
+                            "topLevelComment": {
+                                "id": "c1",
+                                "snippet": {
+                                    "textOriginal": "00:10:00 foo",
+                                    "publishedAt": "2026-01-01T00:00:00Z",
+                                },
+                            },
+                            "totalReplyCount": 0,
+                        },
+                    }
+                ]
+            }
+        }
+        youtube = _YoutubeMock(pages)
+
+        sources = fetch_timestamp_sources(youtube, "abc123def45", description="")
+        self.assertEqual(len(sources), 1)
+        self.assertIsNone(sources[0].is_pinned)
 
     def test_select_recheck_recent_first_and_cursor_fill(self):
         now = datetime.now(timezone.utc)

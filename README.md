@@ -343,8 +343,10 @@ npm run ci:build
 - `タイトルリスト` は並び順を固定で運用してください（並び替えしない）。
 - 1回の daily crawl で、**新規2件 + 再評価5件** を処理します（環境変数で変更可）。
 - 再評価は「公開後72時間以内の動画」を優先し、残りを `refresh_cursor` 巡回で補完します（`DAILY_RECENT_RECHECK_HOURS` で変更可）。
-- タイムスタンプ抽出は **トップコメント + 返信コメントを優先** し、概要欄は「コメントにない時刻のみ」を補完して索引へ書き込みます（重複はトップ→返信→概要欄の順で1件採用）。
-- コメント抽出のトップコメント取得数上限は `TIMESTAMP_COMMENT_THREAD_LIMIT` で調整できます（既定 300）。
+- タイムスタンプ抽出は **トップコメント + 返信コメントを統合** し、`publishedAt` 昇順で解析した後に `startSeconds` 昇順でHTML用に整形します。
+- コメント取得は上限付きです（既定: トップコメント `maxResults=100 / 最大5ページ / 最大500件`、返信 `maxResults=100 / 1スレッド最大3ページ`）。
+- 取得上限は環境変数で変更できます。  
+  `TIMESTAMP_COMMENT_THREAD_LIMIT`, `TIMESTAMP_TOP_COMMENT_PAGE_SIZE`, `TIMESTAMP_TOP_COMMENT_MAX_PAGES`, `TIMESTAMP_TOP_COMMENT_MAX_ITEMS`, `TIMESTAMP_REPLY_PAGE_SIZE`, `TIMESTAMP_REPLY_MAX_PAGES_PER_THREAD`
 
 
 ## 未使用ファイル整理結果（2026-04-22 時点）

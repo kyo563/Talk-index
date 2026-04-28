@@ -2,30 +2,41 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Callable
+from urllib.parse import parse_qs, urlparse
 
 from crawler.models import TimestampSource
 
+Logger = Callable[[str], None]
 HMS_PATTERN = r"(?:\d{1,2}):[0-5]\d:[0-5]\d"
 LINE_END_PAREN_TS_PATTERN = re.compile(rf"^(?P<label>.*?)[\(（]\s*(?P<ts>{HMS_PATTERN})\s*[\)）]\s*$")
 LEADING_TS_PATTERN = re.compile(rf"^(?P<ts>{HMS_PATTERN})\s*(?P<label>.*)$")
 TREE_PREFIX_PATTERN = re.compile(r"^\s*(?P<prefix>[├┝└┗┣┠┡┢│┃\s]+)?(?P<body>.*)$")
 NOISE_PATTERN = re.compile(r"^[\s\-:：|／/、。・･]+|[\s\-:：|／/、。・･]+$")
+GENERIC_SHORT_WORDS = {"ここ", "好き", "最高", "神", "草", "笑", "www", "やばい", "神回"}
 
 
 @dataclass
 class ParsedTimestampEntry:
-    seconds: int
-    label: str
-    is_minor: bool
+    video_id: str
+    start_seconds: int
+    timestamp_text: str
+    title: str
+    kind: str
+    source_comment_id: str
+    source_parent_comment_id: str
+    is_reply: bool
+    published_at: str
+    author_channel_id: str
+    is_video_owner: bool
+    is_pinned: bool | None
     source_type: str
-    source_priority: int
 
 
 @dataclass
 class GroupedTimeline:
-    major_seconds: int
-    major_label: str
-    minor_items: list[ParsedTimestampEntry] = field(default_factory=list)
+    heading: ParsedTimestampEntry
+    children: list[ParsedTimestampEntry] = field(default_factory=list)
 
 
 def build_timestamp_rows(
@@ -33,24 +44,85 @@ def build_timestamp_rows(
     description: str = "",
     timestamp_sources: list[TimestampSource] | None = None,
     fallback_text: str = "",
+    log: Logger | None = None,
 ) -> list[tuple[str, str, str, str]]:
     sources = _build_effective_sources(description, timestamp_sources, fallback_text)
-    deduped = _merge_and_dedup_entries(sources)
+    comment_sources = [src for src in sources if src.source_type in {"top", "reply"}]
+    comment_sources.sort(key=lambda src: ((src.published_at or "9999-99-99T99:99:99Z"), src.source_id))
+
+    checked_top_count = sum(1 for src in comment_sources if src.source_type == "top")
+    checked_reply_count = sum(1 for src in comment_sources if src.source_type == "reply")
+
+    per_comment_entries: dict[str, list[ParsedTimestampEntry]] = {}
+    for src in comment_sources:
+        entries = _extract_entries_from_source(src, video_url)
+        per_comment_entries[src.source_id] = entries
+
+    extracted_count = sum(len(items) for items in per_comment_entries.values())
+
+    primary_source_ids: set[str] = set()
+    rejected_single_timestamp_comments_count = 0
+    for src in comment_sources:
+        entries = per_comment_entries.get(src.source_id, [])
+        count = len(entries)
+        if count <= 0:
+            continue
+        if src.is_video_owner or src.is_pinned is True:
+            primary_source_ids.add(src.source_id)
+            continue
+        if count >= 2:
+            primary_source_ids.add(src.source_id)
+            continue
+        rejected_single_timestamp_comments_count += 1
+
+    has_primary = bool(primary_source_ids)
+    selected: list[ParsedTimestampEntry] = []
+
+    for src in comment_sources:
+        entries = per_comment_entries.get(src.source_id, [])
+        if not entries:
+            continue
+
+        if src.source_id in primary_source_ids:
+            selected.extend(entries)
+            continue
+
+        if not has_primary:
+            continue
+
+        if len(entries) == 1 and _is_valid_single_supplement(entries[0]):
+            selected.extend(entries)
+
+    deduped = _dedupe_entries(selected)
+    deduped.sort(key=lambda ent: ent.start_seconds)
+
     grouped = _group_entries(deduped)
+
+    _log(log, f"checked top-level comments count: {checked_top_count}")
+    _log(log, f"checked reply comments count: {checked_reply_count}")
+    _log(log, f"extracted timestamp entries count: {extracted_count}")
+    _log(log, f"deduped timestamp entries count: {len(deduped)}")
+    _log(log, f"generated headings count: {len(grouped)}")
+    _log(log, f"generated children count: {sum(len(g.children) for g in grouped)}")
+    _log(log, f"rejected single timestamp comments count: {rejected_single_timestamp_comments_count}")
 
     rows: list[tuple[str, str, str, str]] = []
     for group in grouped:
-        major_label = group.major_label or _format_time(group.major_seconds)
-        major_url = _build_timestamp_url(video_url, group.major_seconds)
-
-        if not group.minor_items:
+        major_label = group.heading.title or _format_time(group.heading.start_seconds)
+        major_url = _build_timestamp_url(video_url, group.heading.start_seconds)
+        if not group.children:
             rows.append((major_label, major_url, "", ""))
             continue
 
-        for minor in group.minor_items:
-            minor_label = minor.label or _format_time(minor.seconds)
-            minor_url = _build_timestamp_url(video_url, minor.seconds)
-            rows.append((major_label, major_url, minor_label, minor_url))
+        for child in group.children:
+            rows.append(
+                (
+                    major_label,
+                    major_url,
+                    child.title or _format_time(child.start_seconds),
+                    _build_timestamp_url(video_url, child.start_seconds),
+                )
+            )
 
     return rows
 
@@ -61,22 +133,11 @@ def _build_effective_sources(
     fallback_text: str,
 ) -> list[TimestampSource]:
     items: list[TimestampSource] = []
-
     for src in timestamp_sources or []:
         text = (src.text or "").strip()
         if not text:
             continue
-        items.append(
-            TimestampSource(
-                source_type=src.source_type,
-                text=text,
-                like_count=src.like_count,
-                timestamp_count=src.timestamp_count,
-                source_id=src.source_id,
-                parent_id=src.parent_id,
-                author=src.author,
-            )
-        )
+        items.append(src)
 
     if description.strip():
         items.append(TimestampSource(source_type="description", text=description.strip()))
@@ -87,111 +148,47 @@ def _build_effective_sources(
     return items
 
 
-def _merge_and_dedup_entries(sources: list[TimestampSource]) -> list[ParsedTimestampEntry]:
-    indexed_entries: list[tuple[int, ParsedTimestampEntry]] = []
-    order = 0
-    for source in sources:
-        priority = _source_priority(source.source_type)
-        for raw_line in source.text.splitlines():
-            parsed = _parse_line(raw_line, source.source_type, priority)
-            if not parsed:
-                continue
-            for entry in parsed:
-                indexed_entries.append((order, entry))
-                order += 1
-
-    comment_entries = [(idx, ent) for idx, ent in indexed_entries if ent.source_type != "description"]
-    occupied_seconds = {ent.seconds for _, ent in comment_entries}
-    description_entries = [
-        (idx, ent)
-        for idx, ent in indexed_entries
-        if ent.source_type == "description" and ent.seconds not in occupied_seconds
-    ]
-
-    merged = comment_entries + description_entries
-    exact_merged: dict[tuple[int, str], tuple[int, ParsedTimestampEntry]] = {}
-    for idx, entry in merged:
-        key = (entry.seconds, _normalize_dedup_label(entry.label))
-        existing = exact_merged.get(key)
-        if not existing:
-            exact_merged[key] = (idx, entry)
+def _extract_entries_from_source(src: TimestampSource, video_url: str) -> list[ParsedTimestampEntry]:
+    video_id = _extract_video_id(video_url)
+    entries: list[ParsedTimestampEntry] = []
+    for line in src.text.splitlines():
+        parsed = _parse_line(line)
+        if not parsed:
             continue
-
-        existing_idx, existing_entry = existing
-        if entry.source_priority > existing_entry.source_priority:
-            exact_merged[key] = (idx, entry)
-            continue
-        if entry.source_priority == existing_entry.source_priority:
-            if len(entry.label) > len(existing_entry.label):
-                exact_merged[key] = (idx, entry)
-                continue
-            if len(entry.label) == len(existing_entry.label) and idx < existing_idx:
-                exact_merged[key] = (idx, entry)
-
-    merged = sorted(exact_merged.values(), key=lambda item: item[0])
-    accepted: list[tuple[int, ParsedTimestampEntry]] = []
-
-    for idx, entry in merged:
-        duplicate_indexes = [
-            i
-            for i, (accepted_idx, accepted_entry) in enumerate(accepted)
-            if _is_duplicate_candidate(entry, accepted_entry)
-        ]
-        if not duplicate_indexes:
-            accepted.append((idx, entry))
-            continue
-
-        contenders = [(idx, entry)] + [accepted[i] for i in duplicate_indexes]
-        winner_idx, winner_entry = min(
-            contenders,
-            key=lambda item: (-item[1].source_priority, item[0]),
+        timestamp_text, seconds, title, kind = parsed
+        entries.append(
+            ParsedTimestampEntry(
+                video_id=video_id,
+                start_seconds=seconds,
+                timestamp_text=timestamp_text,
+                title=title,
+                kind=kind,
+                source_comment_id=src.source_id,
+                source_parent_comment_id=src.parent_id,
+                is_reply=src.is_reply,
+                published_at=src.published_at,
+                author_channel_id=src.author_channel_id,
+                is_video_owner=src.is_video_owner,
+                is_pinned=src.is_pinned,
+                source_type=src.source_type,
+            )
         )
-        if winner_idx != idx:
-            continue
-
-        for i in reversed(duplicate_indexes):
-            accepted.pop(i)
-        accepted.append((idx, winner_entry))
-
-    return [entry for _, entry in sorted(accepted, key=lambda item: item[1].seconds)]
+    return entries
 
 
-def _group_entries(entries: list[ParsedTimestampEntry]) -> list[GroupedTimeline]:
-    if not entries:
-        return []
-
-    groups: list[GroupedTimeline] = []
-    current_major: GroupedTimeline | None = None
-
-    for entry in entries:
-        if _is_major_entry(entry):
-            if current_major and not current_major.major_label:
-                current_major.major_label = _format_time(current_major.major_seconds)
-            current_major = GroupedTimeline(major_seconds=entry.seconds, major_label=entry.label)
-            groups.append(current_major)
-            continue
-
-        if current_major is None:
-            continue
-
-        current_major.minor_items.append(entry)
-
-    return groups
-
-
-def _parse_line(line: str, source_type: str, source_priority: int) -> list[ParsedTimestampEntry]:
+def _parse_line(line: str) -> tuple[str, int, str, str] | None:
     normalized = _normalize_line(line)
     if not normalized:
-        return []
+        return None
 
     prefix_match = TREE_PREFIX_PATTERN.match(normalized)
     body = (prefix_match.group("body") if prefix_match else normalized).strip()
     prefix = (prefix_match.group("prefix") if prefix_match else "") or ""
     has_tree_prefix = any(ch in "├┝└┗┣┠┡┢│┃" for ch in prefix)
+    kind = "child" if has_tree_prefix else "heading"
 
     ts = ""
     label_text = ""
-
     lead_match = LEADING_TS_PATTERN.match(body)
     if lead_match:
         ts = (lead_match.group("ts") or "").strip()
@@ -199,41 +196,82 @@ def _parse_line(line: str, source_type: str, source_priority: int) -> list[Parse
     else:
         end_match = LINE_END_PAREN_TS_PATTERN.match(body)
         if not end_match:
-            return []
+            return None
         ts = (end_match.group("ts") or "").strip()
         label_text = (end_match.group("label") or "").strip()
 
     seconds = _timestamp_to_seconds(ts)
     if seconds < 0:
-        return []
+        return None
 
-    label = _clean_label(label_text)
-    if not label:
-        return []
+    title = _clean_label(label_text)
+    if not title:
+        return None
 
-    return [
-        ParsedTimestampEntry(
-            seconds=seconds,
-            label=label,
-            is_minor=has_tree_prefix,
-            source_type=source_type,
-            source_priority=source_priority,
-        )
-    ]
+    return (ts, seconds, title, kind)
 
 
-def _is_major_entry(entry: ParsedTimestampEntry) -> bool:
-    return not entry.is_minor
+def _dedupe_entries(entries: list[ParsedTimestampEntry]) -> list[ParsedTimestampEntry]:
+    deduped: dict[tuple[str, int, str, str], ParsedTimestampEntry] = {}
+    for entry in entries:
+        normalized_title = _normalize_title(entry.title)
+        if not normalized_title:
+            continue
+        key = (entry.video_id, entry.start_seconds, normalized_title, entry.kind)
+        existing = deduped.get(key)
+        if not existing:
+            deduped[key] = entry
+            continue
+        if (entry.published_at or "") < (existing.published_at or ""):
+            deduped[key] = entry
+    return list(deduped.values())
 
 
-def _is_duplicate_candidate(entry: ParsedTimestampEntry, existing: ParsedTimestampEntry) -> bool:
-    if entry.source_type == existing.source_type:
+def _group_entries(entries: list[ParsedTimestampEntry]) -> list[GroupedTimeline]:
+    groups: list[GroupedTimeline] = []
+    latest_heading: GroupedTimeline | None = None
+
+    for entry in entries:
+        if entry.kind == "heading":
+            latest_heading = GroupedTimeline(heading=entry)
+            groups.append(latest_heading)
+            continue
+
+        if latest_heading is None:
+            continue
+
+        if latest_heading.heading.start_seconds <= entry.start_seconds:
+            latest_heading.children.append(entry)
+
+    for group in groups:
+        group.children.sort(key=lambda item: item.start_seconds)
+
+    return groups
+
+
+def _is_valid_single_supplement(entry: ParsedTimestampEntry) -> bool:
+    title = _normalize_title(entry.title)
+    if not title:
         return False
+    if title in {")", "）", "()", "（）"}:
+        return False
+    if title in GENERIC_SHORT_WORDS:
+        return False
+    if re.fullmatch(rf"{HMS_PATTERN}", entry.title):
+        return False
+    if len(title) <= 1:
+        return False
+    return True
 
-    if abs(entry.seconds - existing.seconds) <= 10:
-        return True
 
-    return False
+def _normalize_title(title: str) -> str:
+    value = (title or "").replace("\t", " ").replace("\u3000", " ").strip()
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"[()（）]", "", value)
+    value = value.strip()
+    if value in {"", ")", "）", "()", "（）"}:
+        return ""
+    return value.lower()
 
 
 def _normalize_line(line: str) -> str:
@@ -253,56 +291,56 @@ def _clean_label(label: str) -> str:
     value = re.sub(r"[()（）]", " ", value)
     value = NOISE_PATTERN.sub("", value)
     value = re.sub(r"\s+", " ", value).strip()
-    if value in {")", "）", "(", "（"}:
+    if value in {")", "）", "(", "（", "()", "（）"}:
         return ""
     return value
 
 
-def _normalize_dedup_label(label: str) -> str:
-    value = _clean_label(label).lower()
-    value = re.sub(r"\s+", "", value)
-    return value
-
-
-def _source_priority(source_type: str) -> int:
-    if source_type == "top":
-        return 3
-    if source_type == "reply":
-        return 2
-    return 1
-
-
-def _timestamp_to_seconds(timestamp: str) -> int:
-    raw = (timestamp or "").strip()
-    if not raw:
+def _timestamp_to_seconds(ts: str) -> int:
+    parts = ts.strip().split(":")
+    if len(parts) != 3:
         return -1
-
-    parts = raw.split(":")
     try:
-        nums = [int(p) for p in parts]
+        h, m, s = [int(x) for x in parts]
     except ValueError:
         return -1
-
-    if len(nums) == 3:
-        hh, mm, ss = nums
-        if hh < 0 or mm < 0 or ss < 0 or mm >= 60 or ss >= 60:
-            return -1
-        return hh * 3600 + mm * 60 + ss
-
-    return -1
+    if m < 0 or m >= 60 or s < 0 or s >= 60:
+        return -1
+    return h * 3600 + m * 60 + s
 
 
 def _format_time(seconds: int) -> str:
-    if seconds < 0:
-        return ""
     h = seconds // 3600
-    m = (seconds % 3600) // 60
-    s = seconds % 60
+    rem = seconds % 3600
+    m = rem // 60
+    s = rem % 60
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 def _build_timestamp_url(video_url: str, seconds: int) -> str:
     if seconds <= 0:
         return video_url
-    separator = "&" if "?" in video_url else "?"
-    return f"{video_url}{separator}t={seconds}s"
+    sep = "&" if "?" in video_url else "?"
+    return f"{video_url}{sep}t={seconds}s"
+
+
+def _extract_video_id(video_url: str) -> str:
+    text = (video_url or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = urlparse(text)
+    except ValueError:
+        return ""
+    if parsed.hostname == "youtu.be":
+        return parsed.path.strip("/")
+    if parsed.query:
+        v = parse_qs(parsed.query).get("v", [""])[0].strip()
+        if v:
+            return v
+    return ""
+
+
+def _log(log: Logger | None, message: str) -> None:
+    if log:
+        log(message)

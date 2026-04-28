@@ -13,6 +13,10 @@ from crawler.utils import extract_channel_hint, looks_like_channel_id
 Logger = Callable[[str], None]
 TIMESTAMP_PATTERN = re.compile(r"\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b")
 DEFAULT_TIMESTAMP_COMMENT_THREAD_LIMIT = 300
+DEFAULT_COMMENT_PAGE_SIZE = 100
+DEFAULT_TOP_COMMENT_MAX_PAGES = 5
+DEFAULT_TOP_COMMENT_MAX_ITEMS = 500
+DEFAULT_REPLY_MAX_PAGES_PER_THREAD = 3
 
 
 class YouTubeServiceError(RuntimeError):
@@ -166,6 +170,7 @@ def fetch_channel_videos(
                         youtube,
                         video_id,
                         description=description,
+                        video_channel_id=(snippet.get("channelId", "") or "").strip(),
                     )
                     timestamp_comment = _choose_best_comment_source_text(timestamp_sources)
                 except YouTubeServiceError as exc:
@@ -197,6 +202,7 @@ def fetch_timestamp_sources(
     youtube,
     video_id: str,
     description: str | None = None,
+    video_channel_id: str | None = None,
 ) -> list[TimestampSource]:
     value = (video_id or "").strip()
     if not value:
@@ -218,9 +224,27 @@ def fetch_timestamp_sources(
             )
 
     thread_limit = _load_comment_thread_limit()
-    thread_items = _fetch_comment_threads(youtube, value, thread_limit)
+    top_page_size = _load_positive_int_env("TIMESTAMP_TOP_COMMENT_PAGE_SIZE", DEFAULT_COMMENT_PAGE_SIZE)
+    top_max_pages = _load_positive_int_env("TIMESTAMP_TOP_COMMENT_MAX_PAGES", DEFAULT_TOP_COMMENT_MAX_PAGES)
+    top_max_items = _load_positive_int_env("TIMESTAMP_TOP_COMMENT_MAX_ITEMS", DEFAULT_TOP_COMMENT_MAX_ITEMS)
+    reply_page_size = _load_positive_int_env("TIMESTAMP_REPLY_PAGE_SIZE", DEFAULT_COMMENT_PAGE_SIZE)
+    reply_max_pages = _load_positive_int_env(
+        "TIMESTAMP_REPLY_MAX_PAGES_PER_THREAD",
+        DEFAULT_REPLY_MAX_PAGES_PER_THREAD,
+    )
+    video_owner_channel_id = (video_channel_id or "").strip()
+
+    thread_items = _fetch_comment_threads(
+        youtube,
+        value,
+        thread_limit=min(thread_limit, top_max_items),
+        page_size=top_page_size,
+        max_pages=top_max_pages,
+    )
     for item in thread_items:
         thread_snippet = item.get("snippet", {})
+        pinned_hint = thread_snippet.get("isPinned")
+        is_pinned = bool(pinned_hint) if isinstance(pinned_hint, bool) else None
         top_level = thread_snippet.get("topLevelComment", {})
         top_level_id = (top_level.get("id") or item.get("id") or "").strip()
 
@@ -230,11 +254,20 @@ def fetch_timestamp_sources(
             source_type="top",
             source_id=top_level_id,
             parent_id="",
+            is_reply=False,
+            is_pinned=is_pinned,
+            video_owner_channel_id=video_owner_channel_id,
         )
         if top_source:
             results.append(top_source)
 
-        replies = _fetch_all_replies(youtube, item, top_level_id=top_level_id)
+        replies = _fetch_all_replies(
+            youtube,
+            item,
+            top_level_id=top_level_id,
+            page_size=reply_page_size,
+            max_pages=reply_max_pages,
+        )
         for reply in replies:
             reply_id = (reply.get("id") or "").strip()
             reply_source = _build_comment_source(
@@ -242,19 +275,18 @@ def fetch_timestamp_sources(
                 source_type="reply",
                 source_id=reply_id,
                 parent_id=top_level_id,
+                is_reply=True,
+                is_pinned=None,
+                video_owner_channel_id=video_owner_channel_id,
             )
             if reply_source:
                 results.append(reply_source)
 
-    results.sort(
-        key=lambda src: (
-            1 if src.source_type == "description" else 0,
-            int(src.timestamp_count),
-            int(src.like_count),
-            len(src.text),
-        ),
-        reverse=True,
-    )
+    comment_sources = [src for src in results if src.source_type in {"top", "reply"}]
+    comment_sources.sort(key=lambda src: (_to_sortable_datetime(src.published_at), src.source_id))
+    non_comments = [src for src in results if src.source_type == "description"]
+    results = comment_sources + non_comments
+
     return results
 
 
@@ -271,20 +303,39 @@ def _load_comment_thread_limit() -> int:
     return value
 
 
-def _fetch_comment_threads(youtube, video_id: str, thread_limit: int) -> list[dict]:
+def _load_positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise YouTubeServiceError(f"{name} は整数で指定してください。") from exc
+    if value <= 0:
+        raise YouTubeServiceError(f"{name} は1以上で指定してください。")
+    return value
+
+
+def _fetch_comment_threads(
+    youtube,
+    video_id: str,
+    thread_limit: int,
+    page_size: int,
+    max_pages: int,
+) -> list[dict]:
     items: list[dict] = []
     page_token = None
+    pages_fetched = 0
 
-    while len(items) < thread_limit:
-        per_page = min(100, thread_limit - len(items))
+    while len(items) < thread_limit and pages_fetched < max_pages:
+        per_page = min(page_size, thread_limit - len(items))
         try:
             response = (
                 youtube.commentThreads()
                 .list(
                     part="snippet,replies",
                     videoId=video_id,
-                    # 手動運用との整合のため relevance を維持しつつ、複数ページを回収する。
-                    order="relevance",
+                    order="time",
                     textFormat="plainText",
                     maxResults=per_page,
                     pageToken=page_token,
@@ -301,6 +352,7 @@ def _fetch_comment_threads(youtube, video_id: str, thread_limit: int) -> list[di
             break
 
         items.extend(page_items)
+        pages_fetched += 1
         page_token = response.get("nextPageToken")
         if not page_token:
             break
@@ -372,7 +424,13 @@ def _collect_timestamp_comment_rows(youtube, response: dict) -> list[dict[str, s
     return results
 
 
-def _fetch_all_replies(youtube, thread_item: dict, top_level_id: str) -> list[dict]:
+def _fetch_all_replies(
+    youtube,
+    thread_item: dict,
+    top_level_id: str,
+    page_size: int = DEFAULT_COMMENT_PAGE_SIZE,
+    max_pages: int = DEFAULT_REPLY_MAX_PAGES_PER_THREAD,
+) -> list[dict]:
     embedded_replies = thread_item.get("replies", {}).get("comments", [])
     total_reply_count = int(thread_item.get("snippet", {}).get("totalReplyCount", 0) or 0)
     if total_reply_count <= len(embedded_replies):
@@ -383,7 +441,8 @@ def _fetch_all_replies(youtube, thread_item: dict, top_level_id: str) -> list[di
 
     replies: list[dict] = []
     page_token = None
-    while True:
+    pages_fetched = 0
+    while pages_fetched < max_pages:
         try:
             response = (
                 youtube.comments()
@@ -391,7 +450,7 @@ def _fetch_all_replies(youtube, thread_item: dict, top_level_id: str) -> list[di
                     part="snippet",
                     parentId=top_level_id,
                     textFormat="plainText",
-                    maxResults=100,
+                    maxResults=page_size,
                     pageToken=page_token,
                 )
                 .execute()
@@ -402,6 +461,7 @@ def _fetch_all_replies(youtube, thread_item: dict, top_level_id: str) -> list[di
             ) from exc
 
         replies.extend(response.get("items", []))
+        pages_fetched += 1
         page_token = response.get("nextPageToken")
         if not page_token:
             break
@@ -464,7 +524,12 @@ def fetch_video_item(youtube, video_id: str) -> VideoItem:
         or ""
     )
     description = (snippet.get("description", "") or "").strip()
-    timestamp_sources = fetch_timestamp_sources(youtube, value, description=description)
+    timestamp_sources = fetch_timestamp_sources(
+        youtube,
+        value,
+        description=description,
+        video_channel_id=(snippet.get("channelId", "") or "").strip(),
+    )
 
     return VideoItem(
         video_id=value,
@@ -532,14 +597,20 @@ def _build_comment_source(
     source_type: str,
     source_id: str,
     parent_id: str,
+    is_reply: bool,
+    is_pinned: bool | None,
+    video_owner_channel_id: str,
 ) -> TimestampSource | None:
     text = (snippet.get("textOriginal", "") or "").strip()
     if not text:
         return None
 
     ts_count = _count_timestamps(text)
-    if ts_count <= 0:
-        return None
+    author_channel_id = (
+        (snippet.get("authorChannelId", {}) or {}).get("value", "")
+        if isinstance(snippet.get("authorChannelId"), dict)
+        else ""
+    ).strip()
 
     return TimestampSource(
         source_type=source_type,  # type: ignore[arg-type]
@@ -549,7 +620,19 @@ def _build_comment_source(
         source_id=source_id,
         parent_id=parent_id,
         author=(snippet.get("authorDisplayName", "") or "").strip(),
+        published_at=(snippet.get("publishedAt", "") or "").strip(),
+        author_channel_id=author_channel_id,
+        is_video_owner=bool(video_owner_channel_id and author_channel_id == video_owner_channel_id),
+        is_reply=is_reply,
+        is_pinned=is_pinned,
     )
+
+
+def _to_sortable_datetime(value: str) -> tuple[int, str]:
+    text = (value or "").strip()
+    if not text:
+        return (1, "")
+    return (0, text)
 
 
 def _choose_best_comment_source_text(sources: list[TimestampSource]) -> str:

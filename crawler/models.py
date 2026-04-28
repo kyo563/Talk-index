@@ -16,6 +16,11 @@ class TimestampSource:
     source_id: str = ""
     parent_id: str = ""
     author: str = ""
+    published_at: str = ""
+    author_channel_id: str = ""
+    is_video_owner: bool = False
+    is_reply: bool = False
+    is_pinned: bool | None = None
 
 
 @dataclass
