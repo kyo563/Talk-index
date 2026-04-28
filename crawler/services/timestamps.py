@@ -5,11 +5,10 @@ from dataclasses import dataclass, field
 
 from crawler.models import TimestampSource
 
-TS_PATTERN = re.compile(r"(?<!\d)(?P<ts>(?:\d{1,2}:)?\d{1,2}:\d{2})(?!\d)")
-LINE_END_PAREN_TS_PATTERN = re.compile(r"^(?P<label>.*?)[\(（]\s*(?P<ts>(?:\d{1,2}:)?\d{1,2}:\d{2})\s*[\)）]\s*$")
-LEADING_TS_PATTERN = re.compile(r"^\s*(?P<ts>(?:\d{1,2}:)?\d{1,2}:\d{2})\s*(?P<label>.*)$")
-MINOR_PREFIX_PATTERN = re.compile(r"^\s*(?:[└┝├]|[-・●◦*])\s*")
-MAJOR_BRACKET_PATTERN = re.compile(r"【\s*(?P<label>[^】]+?)\s*】")
+HMS_PATTERN = r"(?:\d{1,2}):[0-5]\d:[0-5]\d"
+LINE_END_PAREN_TS_PATTERN = re.compile(rf"^(?P<label>.*?)[\(（]\s*(?P<ts>{HMS_PATTERN})\s*[\)）]\s*$")
+LEADING_TS_PATTERN = re.compile(rf"^(?P<ts>{HMS_PATTERN})\s*(?P<label>.*)$")
+TREE_PREFIX_PATTERN = re.compile(r"^\s*(?P<prefix>[├┝└┗┣┠┡┢│┃\s]+)?(?P<body>.*)$")
 NOISE_PATTERN = re.compile(r"^[\s\-:：|／/、。・･]+|[\s\-:：|／/、。・･]+$")
 
 
@@ -165,7 +164,7 @@ def _group_entries(entries: list[ParsedTimestampEntry]) -> list[GroupedTimeline]
     current_major: GroupedTimeline | None = None
 
     for entry in entries:
-        if _is_major_entry(entry, current_major is None):
+        if _is_major_entry(entry):
             if current_major and not current_major.major_label:
                 current_major.major_label = _format_time(current_major.major_seconds)
             current_major = GroupedTimeline(major_seconds=entry.seconds, major_label=entry.label)
@@ -173,8 +172,6 @@ def _group_entries(entries: list[ParsedTimestampEntry]) -> list[GroupedTimeline]
             continue
 
         if current_major is None:
-            current_major = GroupedTimeline(major_seconds=entry.seconds, major_label=entry.label)
-            groups.append(current_major)
             continue
 
         current_major.minor_items.append(entry)
@@ -187,86 +184,46 @@ def _parse_line(line: str, source_type: str, source_priority: int) -> list[Parse
     if not normalized:
         return []
 
-    major_bracket = MAJOR_BRACKET_PATTERN.search(normalized)
-    major_hint = (major_bracket.group("label") if major_bracket else "").strip()
+    prefix_match = TREE_PREFIX_PATTERN.match(normalized)
+    body = (prefix_match.group("body") if prefix_match else normalized).strip()
+    prefix = (prefix_match.group("prefix") if prefix_match else "") or ""
+    has_tree_prefix = any(ch in "├┝└┗┣┠┡┢│┃" for ch in prefix)
 
-    end_match = LINE_END_PAREN_TS_PATTERN.match(normalized)
-    if end_match:
-        ts = (end_match.group("ts") or "").strip()
-        label = _clean_label((end_match.group("label") or "").strip())
-        seconds = _timestamp_to_seconds(ts)
-        if seconds >= 0:
-            return [
-                ParsedTimestampEntry(
-                    seconds=seconds,
-                    label=label,
-                    is_minor=True,
-                    source_type=source_type,
-                    source_priority=source_priority,
-                )
-            ]
+    ts = ""
+    label_text = ""
 
-    leading_minor = bool(MINOR_PREFIX_PATTERN.match(normalized))
-    cleaned_for_head = MINOR_PREFIX_PATTERN.sub("", normalized)
-    lead_match = LEADING_TS_PATTERN.match(cleaned_for_head)
+    lead_match = LEADING_TS_PATTERN.match(body)
     if lead_match:
         ts = (lead_match.group("ts") or "").strip()
-        label_text = _clean_label((lead_match.group("label") or "").strip())
-        seconds = _timestamp_to_seconds(ts)
-        if seconds >= 0:
-            is_major = _looks_like_major(ts, label_text, major_hint, leading_minor)
-            return [
-                ParsedTimestampEntry(
-                    seconds=seconds,
-                    label=label_text or major_hint,
-                    is_minor=not is_major,
-                    source_type=source_type,
-                    source_priority=source_priority,
-                )
-            ]
+        label_text = (lead_match.group("label") or "").strip()
+    else:
+        end_match = LINE_END_PAREN_TS_PATTERN.match(body)
+        if not end_match:
+            return []
+        ts = (end_match.group("ts") or "").strip()
+        label_text = (end_match.group("label") or "").strip()
 
-    entries: list[ParsedTimestampEntry] = []
-    for match in TS_PATTERN.finditer(normalized):
-        ts = (match.group("ts") or "").strip()
-        seconds = _timestamp_to_seconds(ts)
-        if seconds < 0:
-            continue
+    seconds = _timestamp_to_seconds(ts)
+    if seconds < 0:
+        return []
 
-        left = _clean_label(normalized[: match.start()].strip())
-        right = _clean_label(normalized[match.end() :].strip())
-        label = left or right or major_hint
-        entries.append(
-            ParsedTimestampEntry(
-                seconds=seconds,
-                label=label,
-                is_minor=True,
-                source_type=source_type,
-                source_priority=source_priority,
-            )
+    label = _clean_label(label_text)
+    if not label:
+        return []
+
+    return [
+        ParsedTimestampEntry(
+            seconds=seconds,
+            label=label,
+            is_minor=has_tree_prefix,
+            source_type=source_type,
+            source_priority=source_priority,
         )
-
-    return entries
-
-
-def _is_major_entry(entry: ParsedTimestampEntry, is_first_entry: bool) -> bool:
-    if not entry.is_minor:
-        return True
-    if is_first_entry:
-        return True
-    return False
+    ]
 
 
-def _looks_like_major(ts: str, label: str, major_hint: str, has_minor_marker: bool) -> bool:
-    if has_minor_marker:
-        return False
-
-    if label.strip():
-        return True
-
-    if major_hint.strip():
-        return True
-
-    return False
+def _is_major_entry(entry: ParsedTimestampEntry) -> bool:
+    return not entry.is_minor
 
 
 def _is_duplicate_candidate(entry: ParsedTimestampEntry, existing: ParsedTimestampEntry) -> bool:
@@ -280,7 +237,7 @@ def _is_duplicate_candidate(entry: ParsedTimestampEntry, existing: ParsedTimesta
 
 
 def _normalize_line(line: str) -> str:
-    value = (line or "").replace("\u3000", " ").strip()
+    value = (line or "").replace("\u3000", " ").replace("\t", " ").strip()
     if not value:
         return ""
     value = value.replace("｜", "|")
@@ -292,8 +249,7 @@ def _clean_label(label: str) -> str:
     value = (label or "").strip()
     if not value:
         return ""
-    value = TS_PATTERN.sub(" ", value)
-    value = value.replace("【】", " ")
+    value = re.sub(rf"{HMS_PATTERN}", " ", value)
     value = re.sub(r"[()（）]", " ", value)
     value = NOISE_PATTERN.sub("", value)
     value = re.sub(r"\s+", " ", value).strip()
@@ -326,12 +282,6 @@ def _timestamp_to_seconds(timestamp: str) -> int:
         nums = [int(p) for p in parts]
     except ValueError:
         return -1
-
-    if len(nums) == 2:
-        mm, ss = nums
-        if mm < 0 or ss < 0 or ss >= 60:
-            return -1
-        return mm * 60 + ss
 
     if len(nums) == 3:
         hh, mm, ss = nums

@@ -23,8 +23,8 @@ class TimestampTests(unittest.TestCase):
     def test_line_end_parenthesis_minor(self):
         text = "\n".join([
             "0:00:30 大見出し",
-            "小見出し情報(1:23)",
-            "小見出し情報（1:23）",
+            "├小見出し情報(1:23:45)",
+            "├小見出し情報（1:23:45）",
         ])
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
@@ -33,14 +33,14 @@ class TimestampTests(unittest.TestCase):
         minors = [r[2] for r in rows if r[2]]
         self.assertEqual(minors.count("小見出し情報"), 1)
 
-    def test_mmss_major_and_minor_grouping_from_comment(self):
+    def test_tree_prefix_and_hhmmss_grouping_from_comment(self):
         comment = "\n".join([
-            "00:00 大見出し①",
-            "├0:10 小見出し1",
-            "├0:20 小見出し2",
-            "30:00 大見出し②",
-            "├30:10 小見出し2-1",
-            "├30:20 小見出し2-2",
+            "00:00:00 大見出し①",
+            "├0:00:10 小見出し1",
+            "├0:00:20 小見出し2",
+            "00:30:00 大見出し②",
+            "├0:30:10 小見出し2-1",
+            "├0:30:20 小見出し2-2",
         ])
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
@@ -53,8 +53,8 @@ class TimestampTests(unittest.TestCase):
         self.assertEqual(majors_for_late_minors, {"大見出し②"})
 
     def test_comment_priority_and_description_complement(self):
-        comment = "\n".join(["00:00 大見出し①", "30:00 大見出し②"])
-        description = "\n".join(["0:00 オープニング", "15:00 中間チャプター", "30:00 後半"])
+        comment = "\n".join(["00:00:00 大見出し①", "00:30:00 大見出し②"])
+        description = "\n".join(["0:00:00 オープニング", "0:15:00 中間チャプター", "0:30:00 後半"])
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
             description=description,
@@ -68,21 +68,21 @@ class TimestampTests(unittest.TestCase):
         self.assertNotIn("オープニング", major_labels)
         self.assertNotIn("後半", major_labels)
 
-    def test_mmss_major_are_separated(self):
+    def test_mmss_is_ignored(self):
         comment = "\n".join(["05:00 トークA", "10:00 トークB", "15:00 トークC"])
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
             timestamp_sources=[TimestampSource(source_type="top", text=comment)],
         )
-        self.assertEqual([row[0] for row in rows], ["トークA", "トークB", "トークC"])
+        self.assertEqual(rows, [])
 
     def test_same_label_far_apart_can_coexist(self):
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
             description="",
             timestamp_sources=[
-                TimestampSource(source_type="top", text="05:00 雑談"),
-                TimestampSource(source_type="reply", text="45:00 雑談"),
+                TimestampSource(source_type="top", text="00:05:00 雑談"),
+                TimestampSource(source_type="reply", text="00:45:00 雑談"),
             ],
         )
         self.assertEqual([row[0] for row in rows], ["雑談", "雑談"])
@@ -97,10 +97,10 @@ class TimestampTests(unittest.TestCase):
     def test_duplicate_within_ten_seconds_keeps_top(self):
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
-            description="20:09 後半開始",
+            description="0:20:09 後半開始",
             timestamp_sources=[
-                TimestampSource(source_type="top", text="20:00 本題"),
-                TimestampSource(source_type="reply", text="20:07 メイントーク"),
+                TimestampSource(source_type="top", text="0:20:00 本題"),
+                TimestampSource(source_type="reply", text="0:20:07 メイントーク"),
             ],
         )
         self.assertEqual(len(rows), 1)
@@ -111,8 +111,8 @@ class TimestampTests(unittest.TestCase):
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
             timestamp_sources=[
-                TimestampSource(source_type="top", text="20:00 本題"),
-                TimestampSource(source_type="reply", text="20:10 補足"),
+                TimestampSource(source_type="top", text="0:20:00 本題"),
+                TimestampSource(source_type="reply", text="0:20:10 補足"),
             ],
         )
         self.assertEqual(len(rows), 1)
@@ -123,7 +123,7 @@ class TimestampTests(unittest.TestCase):
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
             timestamp_sources=[
-                TimestampSource(source_type="top", text="10:00 話題A\n10:06 話題B"),
+                TimestampSource(source_type="top", text="0:10:00 話題A\n0:10:06 話題B"),
             ],
         )
         self.assertEqual([row[0] for row in rows], ["話題A", "話題B"])
@@ -131,13 +131,44 @@ class TimestampTests(unittest.TestCase):
     def test_over_ten_seconds_can_coexist(self):
         rows = build_timestamp_rows(
             video_url="https://www.youtube.com/watch?v=abc123def45",
-            description="40:30 話題C",
+            description="0:40:30 話題C",
             timestamp_sources=[
-                TimestampSource(source_type="top", text="40:00 話題A"),
-                TimestampSource(source_type="reply", text="40:12 話題B"),
+                TimestampSource(source_type="top", text="0:40:00 話題A"),
+                TimestampSource(source_type="reply", text="0:40:12 話題B"),
             ],
         )
         self.assertEqual([row[0] for row in rows], ["話題A", "話題B", "話題C"])
+
+    def test_additional_rules_requested(self):
+        text = "\n".join([
+            "00:00:00 【オープニングトーク】",
+            "├0:02:31 応援じーじ声入り応援ばーば",
+            "└本日は台湾コーラでカレピ杯",
+            "00:06:57 【本日のアンケート】",
+            "└GWなにして過ごす？",
+            "00:09:52 【12時間配信開催決定！！】",
+            "├0:11:00 今年も目白押し",
+            "├年3回のお祭り",
+            "├ホラゲーもあるよ！ (0:13:32)",
+            "タイトル (1:23:45)",
+            "├）(2:00:00)",
+        ])
+        rows = build_timestamp_rows(
+            video_url="https://www.youtube.com/watch?v=ZUNdZKMWsUQ",
+            timestamp_sources=[TimestampSource(source_type="top", text=text)],
+        )
+
+        majors = [r[0] for r in rows]
+        minors = [r[2] for r in rows if r[2]]
+
+        self.assertIn("【オープニングトーク】", majors)
+        self.assertIn("【本日のアンケート】", majors)
+        self.assertIn("【12時間配信開催決定！！】", majors)
+        self.assertIn("今年も目白押し", minors)
+        self.assertNotIn("年3回のお祭り", minors)
+        self.assertIn("ホラゲーもあるよ！", minors)
+        self.assertIn("タイトル", majors)
+        self.assertNotIn("）", minors)
 
 
 if __name__ == "__main__":
